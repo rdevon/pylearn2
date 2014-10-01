@@ -1,4 +1,5 @@
 from pylearn2.models.dbm.dbm import DBM
+from pylearn2.models.dbm.dbm import RBM
 from pylearn2.models.dbm.layer import BinaryVector, BinaryVectorMaxPool, Softmax, GaussianVisLayer
 
 __authors__ = "Ian Goodfellow"
@@ -13,12 +14,15 @@ assert hasattr(np, 'exp')
 
 from theano import config
 from theano import function
+from theano import printing
 from theano.sandbox.rng_mrg import MRG_RandomStreams
 from theano import tensor as T
 
 from pylearn2.expr.basic import is_binary
 from pylearn2.expr.nnet import inverse_sigmoid_numpy
 from pylearn2.costs.dbm import VariationalCD
+from pylearn2.costs.dbm import BaseCD
+from pylearn2.costs.dbm import PCD
 import pylearn2.testing.datasets as datasets
 from pylearn2.space import VectorSpace
 from pylearn2.utils import sharedX
@@ -134,221 +138,156 @@ class TestBinaryVector:
         TestBinaryVector.check_samples(sample, (num_samples, n), mean, tol)
 
 
-def check_gaussian_samples(value, nsamples, nvis, rows, cols, channels, expected_mean, tol):
-    """
-    Tests that a matrix of Gaussian samples (observations in rows, variables
-     in columns)
-    1) Has the right shape
-    2) Is not binary
-    3) Converges to the right mean
+class TestGaussianVisLayer:
 
-    """
-    if nvis:
-        expected_shape = (nsamples, nvis)
-    else:
-        expected_shape = (nsamples,rows,cols,channels)
-    assert value.shape == expected_shape
-    assert not is_binary(value)
-    mean = value.mean(axis=0)
-    max_error = np.abs(mean-expected_mean).max()
-    print 'Actual mean:'
-    print mean
-    print 'Expected mean:'
-    print expected_mean
-    print 'Maximal error:', max_error
-    print 'Tolerable variance:', tol
-    if max_error > tol:
-        raise ValueError("Samples don't seem to have the right mean.")
-    else:
-        print 'Mean is within expected range'
+    def setUp(self):
+        pass
 
-
-def test_gaussian_vis_layer_make_state():
-    """
-    Verifies that GaussianVisLayer.make_state creates
-    a shared variable whose value passes check_gaussian_samples
-
-    In this case the layer lives in a VectorSpace
-
-    """
-    n = 5
-    rows = None
-    cols = None
-    channels = None
-    num_samples = 1000
-    tol = .042 # tolerated variance
-    beta = 1/tol # precision parameter
-
-    layer = GaussianVisLayer(nvis = n, init_beta=beta)
-
-    rng = np.random.RandomState([2012,11,1])
-
-    mean = rng.uniform(1e-6, 1. - 1e-6, (n,))
-
-    z= mean
-
-    layer.set_biases(z.astype(config.floatX))
-
-    init_state = layer.make_state(num_examples=num_samples,
-            numpy_rng=rng)
-
-    value = init_state.get_value()
-
-    check_gaussian_samples(value, num_samples, n, rows, cols, channels, mean, tol)
-
-def test_gaussian_vis_layer_make_state_conv():
-    """
-    Verifies that GaussianVisLayer.make_state creates
-    a shared variable whose value passes check_gaussian_samples
-
-    In this case the layer lives in a Conv2DSpace
-
-    """
-    n = None
-    rows = 3
-    cols = 3
-    channels = 3
-    num_samples = 1000
-    tol = .042  # tolerated variance
-    beta = 1/tol  # precision parameter
-    # axes for batch, rows, cols, channels, can be given in any order
-    axes = ['b', 0, 1, 'c']
-    random.shuffle(axes)
-    axes = tuple(axes)
-    print 'axes:', axes
-
-    layer = GaussianVisLayer(rows=rows, cols=cols, channels=channels, init_beta=beta, axes=axes)
-
-    # rng = np.random.RandomState([2012,11,1])
-    rng = np.random.RandomState()
-    mean = rng.uniform(1e-6, 1. - 1e-6, (rows, cols, channels))
-
-    #z = inverse_sigmoid_numpy(mean)
-    z= mean
-
-    layer.set_biases(z.astype(config.floatX))
-
-    init_state = layer.make_state(num_examples=num_samples,
-            numpy_rng=rng)
-
-    value = init_state.get_value()
-
-    check_gaussian_samples(value, num_samples, n, rows, cols, channels, mean, tol)
-
-def test_gaussian_vis_layer_sample():
-    """
-    Verifies that GaussianVisLayer.sample returns an expression
-    whose value passes check_gaussian_samples
-
-    In this case the layer lives in a VectorSpace
-
-    """
-    assert hasattr(np, 'exp')
-
-    n = 5
-    num_samples = 1000
-    tol = .042  # tolerated variance
-    beta = 1/tol  # precision parameter
-    rows = None
-    cols = None
-    channels = None
-
-    class DummyLayer(object):
+    @staticmethod
+    def check_samples(value, nsamples, nvis, rows, cols, channels, expected_mean, tol):
         """
-        A layer that we build for the test that just uses a state
-        as its downward message.
+        Tests that a matrix of Gaussian samples (observations in rows, variables
+        in columns)
+        1) Has the right shape
+        2) Is not binary
+        3) Converges to the right mean
+
         """
+        if nvis:
+            expected_shape = (nsamples, nvis)
+        else:
+            expected_shape = (nsamples,rows,cols,channels)
+        assert value.shape == expected_shape
+        assert not is_binary(value)
+        mean = value.mean(axis=0)
+        max_error = np.abs(mean-expected_mean).max()
+        print 'Actual mean:'
+        print mean
+        print 'Expected mean:'
+        print expected_mean
+        print 'Maximal error:', max_error
+        print 'Tolerable variance:', tol
+        if max_error > tol:
+            raise ValueError("Samples don't seem to have the right mean.")
+        else:
+            print 'Mean is within expected range'
 
-        def downward_state(self, state):
-            return state
-
-        def downward_message(self, state):
-            return state
-
-    vis = GaussianVisLayer(nvis=n, init_beta=beta)
-    hid = DummyLayer()
-
-    rng = np.random.RandomState([2012,11,1,259])
-
-    mean = rng.uniform(1e-6, 1. - 1e-6, (n,))
-
-    ofs = rng.randn(n)
-
-    vis.set_biases(ofs.astype(config.floatX))
-
-    #z = inverse_sigmoid_numpy(mean) - ofs
-    z=mean -ofs # linear activation function
-    z_var = sharedX(np.zeros((num_samples, n)) + z)
-    # mean will be z_var + mu
-
-    theano_rng = MRG_RandomStreams(2012+11+1)
-
-    sample = vis.sample(state_above=z_var, layer_above=hid,
-            theano_rng=theano_rng)
-
-    sample = sample.eval()
-
-    check_gaussian_samples(sample, num_samples, n, rows, cols, channels, mean, tol)
-
-def test_gaussian_vis_layer_sample_conv():
-    """
-    Verifies that GaussianVisLayer.sample returns an expression
-    whose value passes check_gaussian_samples.
-
-    In this case the layer lives in a Conv2DSpace
-
-    """
-    assert hasattr(np, 'exp')
-
-    n = None
-    num_samples = 1000
-    tol = .042  # tolerated variance
-    beta = 1/tol  # precision parameter
-    rows = 3
-    cols = 3
-    channels = 3
-    # axes for batch, rows, cols, channels, can be given in any order
-    axes = ['b', 0, 1, 'c']
-    random.shuffle(axes)
-    axes = tuple(axes)
-    print 'axes:', axes
-
-    class DummyLayer(object):
+    def test_make_state(self, n=5, rows=None, cols=None, channels=None, num_samples=1000, tol=0.042):
         """
-        A layer that we build for the test that just uses a state
-        as its downward message.
+        Verifies that GaussianVisLayer.make_state.
+        Verified that GaussianVisLayer creates a shared variable whose value passes check_samples.
+        In this case the layer lives in a VectorSpace.
+
         """
+        beta = 1/tol # precision parameter
+        assert (n is None and (rows is not None and cols is not None and channels is not None)) or\
+            (n is not None and (rows == cols == channels == None)),\
+            "n must be None or rows, cols, and channels must be None"
 
-        def downward_state(self, state):
-            return state
+        rng = np.random.RandomState([2012,11,1])
+        if n is not None:
+            layer = GaussianVisLayer(nvis = n, init_beta=beta)
+            mean = rng.uniform(1e-6, 1. - 1e-6, (n,))
+        else:
+            # axes for batch, rows, cols, channels, can be given in any order
+            axes = ['b', 0, 1, 'c']
+            random.shuffle(axes)
+            axes = tuple(axes)
+            layer = GaussianVisLayer(rows=rows, cols=cols, channels=channels,
+                                     init_beta=beta, axes=axes)
+            mean = rng.uniform(1e-6, 1. - 1e-6, (rows, cols, channels))
 
-        def downward_message(self, state):
-            return state
+        z = mean
+        layer.set_biases(z.astype(config.floatX))
+        init_state = layer.make_state(num_examples=num_samples,
+                                      numpy_rng=rng)
+        value = init_state.get_value()
+        TestGaussianVisLayer.check_samples(value, num_samples, n, rows, cols, channels, mean, tol)
 
-    vis = GaussianVisLayer(nvis=None,rows=rows, cols=cols, channels=channels, init_beta=beta, axes=axes)
-    hid = DummyLayer()
+    def test_make_state_conv(self, n=None, rows=3, cols=3, channels=3, num_samples=1000, tol=0.042):
+        """
+        Verifies that GaussianVisLayer.make_state.
+        Verifies that GaussianVisLayer.make_state creates a shared variable
+        whose value passes check_samples. In this case the layer lives in a Conv2DSpace.
 
-    rng = np.random.RandomState([2012,11,1,259])
+        Parameters:
+        ----------
+        n: detector layer dimension.
+        num_samples: number of samples or observations over each dimension.
+        tol: tolerace in comparisons
+        rows: number of rows in convolutional detector. Must be None if n is not None
+        cols: number of cols in convolutional detector. Must be None if n is not None
+        channels: number of channels in convolutional detector. Must be None if n is not None
+        """
+        self.test_make_state(n, rows, cols, channels, num_samples, tol)
 
-    mean = rng.uniform(1e-6, 1. - 1e-6, (rows, cols, channels))
+    def test_sample(self, n=5, rows=None, cols=None, channels=None, num_samples=1000, tol=0.042):
+        """
+        Verifies that GaussianVisLayer.sample returns an expression whose value passes check_samples.
+        In this case the layer lives in a VectorSpace.
 
-    ofs = rng.randn(rows,cols,channels)
+        Parameters:
+        -----------
+        n: detector layer dimension.
+        num_samples: number of samples or observations over each dimension.
+        tol: tolerace in comparisons
+        rows: number of rows in convolutional detector.  Must be None if n is not None
+        cols: number of cols in convolutional detector.  Must be None if n is not None
+        channels: number of channels in convolutional detector.  Must be None if n is not None
+        """
+        assert hasattr(np, 'exp')
 
-    vis.set_biases(ofs.astype(config.floatX))
+        beta = 1/tol  # precision parameter
+        assert (n is None and (rows is not None and cols is not None and channels is not None)) or\
+            (n is not None and (rows == cols == channels == None)),\
+            "n must be None or rows, cols, and channels must be None"
 
-    #z = inverse_sigmoid_numpy(mean) - ofs
-    z = mean -ofs
+        rng = np.random.RandomState([2012,11,1,259])
+        if n is not None:
+            vis = GaussianVisLayer(nvis=n, init_beta=beta)
+            mean = rng.uniform(1e-6, 1. - 1e-6, (n,))
+            ofs = rng.randn(n)
+        else:
+            # axes for batch, rows, cols, channels, can be given in any order
+            axes = ['b', 0, 1, 'c']
+            random.shuffle(axes)
+            axes = tuple(axes)
+            vis = GaussianVisLayer(nvis=None,rows=rows, cols=cols,
+                                   channels=channels, init_beta=beta, axes=axes)
+            mean = rng.uniform(1e-6, 1. - 1e-6, (rows, cols, channels))
+            ofs = rng.randn(rows,cols,channels)
 
-    z_var = sharedX(np.zeros((num_samples, rows, cols, channels)) + z)
+        hid = DummyLayer()
+        vis.set_biases(ofs.astype(config.floatX))
+        z=mean -ofs # linear activation function
 
-    theano_rng = MRG_RandomStreams(2012+11+1)
+        if n is not None:
+            z_var = sharedX(np.zeros((num_samples, n)) + z)
+        else:
+            z_var = sharedX(np.zeros((num_samples, rows, cols, channels)) + z)
 
-    sample = vis.sample(state_above=z_var, layer_above=hid,
-            theano_rng=theano_rng)
+        theano_rng = MRG_RandomStreams(2012+11+1)
+        sample = vis.sample(state_above=z_var, layer_above=hid,
+                            theano_rng=theano_rng)
+        sample = sample.eval()
+        TestGaussianVisLayer.check_samples(sample, num_samples, n, rows, cols, channels, mean, tol)
 
-    sample = sample.eval()
+    def test_sample_conv(self, n=None, rows=3, cols=3, channels=3, num_samples=1000, tol=0.042):
+        """
+        Verifies that GaussianVisLayer.sample returns an expression whose value passes check_samples.
+        In this case the layer lives in a Conv2DSpace.
 
-    check_gaussian_samples(sample, num_samples, n, rows, cols, channels, mean, tol)
+        Parameters:
+        -----------
+        n: detector layer dimension.  Set to None for convolutional.
+        num_samples: number of samples or observations over each dimension.
+        tol: tolerace in comparisons
+        rows: number of rows in convolutional detector.  Must be None if n is not None
+        cols: number of cols in convolutional detector.  Must be None if n is not None
+        channels: number of channels in convolutional detector.  Must be None if n is not None
+        """
+        self.test_sample(n, rows, cols, channels, num_samples, tol)
+
 
 def check_bvmp_samples(value, num_samples, n, pool_size, mean, tol):
     """
@@ -1161,36 +1100,110 @@ def test_make_symbolic_state():
         assert s.shape == r
 
 
-def test_variational_cd():
+def check_gradients(expected_grad, actual_grad, corr_tol=0.8, mean_tol=0.05):
+    corr = np.corrcoef(expected_grad.flatten(), actual_grad.flatten())[0,1]
+    assert corr >= corr_tol,\
+        ("Correlation did not pass: (%.2f > %.2f)\n" % (corr_tol, corr)) +\
+        ("Expected:\n %r\n" % expected_grad) +\
+        ("Actual:\n %r" % actual_grad)
+    assert (abs(np.mean(expected_grad) - np.mean(actual_grad)) /
+            (np.mean(expected_grad) + np.mean(actual_grad))) < mean_tol,\
+            "Mean did not pass (%.2f expected vs %.2f actual)" %\
+            (np.mean(expected_grad), np.mean(actual_grad))
 
-    # Verifies that VariationalCD works well with make_layer_to_symbolic_state
-    visible_layer = BinaryVector(nvis=100)
-    hidden_layer = BinaryVectorMaxPool(detector_layer_dim=500,
-                                       pool_size=1,
-                                       layer_name='h',
-                                       irange=0.05,
-                                       init_bias=-2.0)
-    model = DBM(visible_layer=visible_layer,
-                hidden_layers=[hidden_layer],
-                batch_size=100,
-                niter=1)
+class Test_CD(object):
+    def test_rbm(self, num_visible=100, num_hidden=50, batch_size=200, variational=False):
+        rng = np.random.RandomState([2012,11,3])
+        theano_rng = MRG_RandomStreams(2024+30+9)
 
-    cost = VariationalCD(num_chains=100, num_gibbs_steps=2)
+        # Set up the RBM (One hidden layer DBM)
+        visible_layer = BinaryVector(nvis=num_visible)
+        visible_layer.set_biases(rng.uniform(-1., 1., (num_visible,)).astype(config.floatX))
+        hidden_layer = BinaryVectorMaxPool(detector_layer_dim=num_hidden,
+                                     pool_size=1,
+                                     layer_name='h',
+                                     irange=0.05,
+                                     init_bias=-2.0)
+        hidden_layer.set_biases(rng.uniform(-1., 1., (num_hidden,)).astype(config.floatX))
+        model = RBM(visible_layer=visible_layer,
+                    hidden_layer=hidden_layer,
+                    batch_size=batch_size, niter=1)
 
-    data_specs = cost.get_data_specs(model)
-    mapping = DataSpecsMapping(data_specs)
-    space_tuple = mapping.flatten(data_specs[0], return_tuple=True)
-    source_tuple = mapping.flatten(data_specs[1], return_tuple=True)
+        if not variational:
+            cost = BaseCD(num_chains=1, num_gibbs_steps=1)
+        else:
+            cost = VariationalCD(num_chains=1, num_gibbs_steps=1)
 
-    theano_args = []
-    for space, source in safe_zip(space_tuple, source_tuple):
-        name = '%s' % (source)
-        arg = space.make_theano_batch(name=name)
-        theano_args.append(arg)
-    theano_args = tuple(theano_args)
-    nested_args = mapping.nest(theano_args)
+        # Set the data
+        X = sharedX(rng.randn(batch_size, num_visible))
+        # Get the gradients from the cost function
+        grads, updates = cost.get_gradients(model, X)
 
-    grads, updates = cost.get_gradients(model, nested_args)
+        # Iterate through the Gibbs chain, collecting P(H|v) when needed.
+        P_H0_given_X = hidden_layer.mf_update(state_below = visible_layer.upward_state(X),
+                                              state_above=None, layer_above=None)[1]
+        H0 = hidden_layer.sample(state_below=visible_layer.upward_state(X),
+                                 state_above=None, layer_above=None,
+                                 theano_rng=theano_rng)[1]
+        V1 = visible_layer.sample(state_above=H0, layer_above=hidden_layer,
+                                  theano_rng=theano_rng)
+        # Find the last visible state from the updates (ignore for now)
+#        V1 = next((updates[update] for update in updates if update.shape.eval()[1] == 100))
+        P_H1_given_V1 = hidden_layer.mf_update(state_below=visible_layer.upward_state(V1),
+                                               state_above=None, layer_above=None)[1]
+
+        # Weight gradients
+        dW_plus = np.dot(X.eval().T, P_H0_given_X.eval())
+        dW_minus = np.dot(V1.eval().T, P_H1_given_V1.eval())
+        dW_expected = -(dW_plus - dW_minus) / batch_size
+        dW_actual = grads[hidden_layer.transformer.get_params()[0]].eval()
+        check_gradients(dW_expected, dW_actual)
+
+        # Visible bias gradients
+        dvb_expected = -np.mean(X.eval() - V1.eval(), axis=0)
+        dvb_actual = grads[visible_layer.bias].eval()
+        check_gradients(dvb_expected, dvb_actual)
+
+        # Hidden bias gradients. Ignore these for now: for the current setup the variance is too high.
+        """
+        dhb_expected = -np.mean(P_H0_given_X.eval() - P_H1_given_V1.eval(), axis=0)
+        dhb_actual = grads[hidden_layer.b].eval()
+        check_gradients(dhb_expected, dhb_actual)
+        """
+
+    def test_rbm_varational(self, num_visible=100, num_hidden=50, batch_size=200):
+        self.test_rbm(num_visible, num_hidden, batch_size, variational=True)
+
+    def test_variational_cd(self):
+
+        # Verifies that VariationalCD works well with make_layer_to_symbolic_state
+        visible_layer = BinaryVector(nvis=100)
+        hidden_layer = BinaryVectorMaxPool(detector_layer_dim=500,
+                                           pool_size=1,
+                                           layer_name='h',
+                                           irange=0.05,
+                                           init_bias=-2.0)
+        model = DBM(visible_layer=visible_layer,
+                    hidden_layers=[hidden_layer],
+                    batch_size=100,
+                    niter=1)
+
+        cost = VariationalCD(num_chains=100, num_gibbs_steps=2)
+
+        data_specs = cost.get_data_specs(model)
+        mapping = DataSpecsMapping(data_specs)
+        space_tuple = mapping.flatten(data_specs[0], return_tuple=True)
+        source_tuple = mapping.flatten(data_specs[1], return_tuple=True)
+
+        theano_args = []
+        for space, source in safe_zip(space_tuple, source_tuple):
+            name = '%s' % (source)
+            arg = space.make_theano_batch(name=name)
+            theano_args.append(arg)
+        theano_args = tuple(theano_args)
+        nested_args = mapping.nest(theano_args)
+
+        grads, updates = cost.get_gradients(model, nested_args)
 
 
 def test_extra():
