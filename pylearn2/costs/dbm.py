@@ -316,33 +316,6 @@ class BaseCD(DefaultDataSpecsMixin, Cost):
                               num_gibbs_steps=self.num_gibbs_steps,
                               theano_rng=self.theano_rng), OrderedDict()
 
-    def _initialize_chains(self, model, X, Y):
-        # Initializing to data
-        layer_to_clamp = OrderedDict([(model.visible_layer, True)])
-        layer_to_chains = model.make_layer_to_symbolic_state(1, self.theano_rng)
-        # initialized the visible layer to data
-        layer_to_chains[model.visible_layer] = X
-        # if supervised, also clamp targets
-        if Y is not None and self.supervised:
-            # note: if the Y layer changes to something without linear energy,
-            # we'll need to make the expected energy clamp Y in the positive
-            # phase
-            target_layer = model.hidden_layers[-1]
-            assert isinstance(target_layer, Softmax)
-            layer_to_clamp[target_layer] = True
-            layer_to_chains[target_layer] = Y
-
-        model.layer_to_chains = layer_to_chains
-        # Note that we replace layer_to_chains with a dict mapping to the new
-        # state of the chains
-        # We first initialize the chain by clamping the visible layer and the
-        # target layer (if it exists)
-        layer_to_chains = model.sampling_procedure.sample(layer_to_chains,
-                                           self.theano_rng,
-                                           layer_to_clamp=layer_to_clamp,
-                                           num_steps=1)
-        return layer_to_chains
-
     def _get_negative_phase(self, model, X, Y=None):
         """
         .. todo::
@@ -354,7 +327,7 @@ class BaseCD(DefaultDataSpecsMixin, Cost):
                         = (sum_h sum_v - exp(-E(v,h)) d/d theta E(v,h) ) / Z
                         = - sum_h sum_v P(v,h)  d/d theta E(v,h)
         """
-        layer_to_chains = self._initialize_chains(model, X, Y)
+        layer_to_chains = model.initialize_chains(X, Y, self.theano_rng)
         updates, layer_to_chains = model.get_sampling_updates(layer_to_chains,
                                                               self.theano_rng,
                                                               num_steps=self.num_gibbs_steps,
@@ -391,7 +364,6 @@ class BaseCD(DefaultDataSpecsMixin, Cost):
         gradients = OrderedDict()
         for param in list(pos_phase_grads.keys()):
             gradients[param] = neg_phase_grads[param] + pos_phase_grads[param]
-
         return gradients, updates
 
     def get_monitoring_channels(self, model, data):

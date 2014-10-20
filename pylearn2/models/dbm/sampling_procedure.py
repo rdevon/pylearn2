@@ -217,11 +217,11 @@ class GibbsOddEven(SamplingProcedure):
     def sample(self, layer_to_state, theano_rng, layer_to_clamp=None, num_steps=1):
         """
         .. todo::
-        
+
             WRITEME
         """
         assert isinstance(num_steps, py_integer_types)
-        assert num_steps > 0
+        assert num_steps >= 0
 
         assert len(self.dbm.hidden_layers) > 0
 

@@ -15,8 +15,8 @@ assert hasattr(np, 'exp')
 from theano import config
 from theano import function
 from theano import printing
-from theano.sandbox.rng_mrg import MRG_RandomStreams
 from theano import tensor as T
+from theano.sandbox.rng_mrg import MRG_RandomStreams
 
 from pylearn2.expr.basic import is_binary
 from pylearn2.expr.nnet import inverse_sigmoid_numpy
@@ -1100,6 +1100,7 @@ def test_make_symbolic_state():
         assert s.shape == r
 
 
+
 def check_gradients(expected_grad, actual_grad, corr_tol=0.8, mean_tol=0.05):
     corr = np.corrcoef(expected_grad.flatten(), actual_grad.flatten())[0,1]
     assert corr >= corr_tol,\
@@ -1111,10 +1112,33 @@ def check_gradients(expected_grad, actual_grad, corr_tol=0.8, mean_tol=0.05):
             "Mean did not pass (%.2f expected vs %.2f actual)" %\
             (np.mean(expected_grad), np.mean(actual_grad))
 
+def make_rbm(num_visible, num_hidden, batch_size, center=False, rng=None):
+    if rng is None:
+        rng = np.random.RandomState([2014,10,7])
+
+    visible_layer = BinaryVector(nvis=num_visible)
+    visible_layer.set_biases(rng.uniform(-1., 1., (num_visible,)).astype(config.floatX))
+    hidden_layer = BinaryVectorMaxPool(detector_layer_dim=num_hidden,
+                                                                pool_size=1,
+                                                                layer_name='h',
+                                                                irange=0.05,
+                                                                init_bias=-2.0,
+                                                                center=center)
+    hidden_layer.set_biases(rng.uniform(-1., 1., (num_hidden,)).astype(config.floatX), recenter=center)
+    model = RBM(visible_layer=visible_layer,
+                           hidden_layer=hidden_layer,
+                           batch_size=batch_size, niter=1)
+
+    return model
+
 class Test_CD(object):
+    """
+    Class to test contrastive divergence.
+    """
+
     @staticmethod
-    def check_rbm_pos_phase(rbm, cost, X):
-        pos_grads, _ = cost._get_positive_phase(rbm, X)
+    def check_rbm_pos_phase(rbm, cost, X, tol=0.8):
+        pos_grads, updates = cost._get_positive_phase(rbm, X)
 
         visible_layer = rbm.visible_layer
         hidden_layer = rbm.hidden_layers[0]
@@ -1123,20 +1147,22 @@ class Test_CD(object):
 
         dW_pos_exp = -1 * np.dot(X.eval().T, P_H0_given_X.eval()) / rbm.batch_size
         dW_pos_act = pos_grads[hidden_layer.transformer.get_params()[0]].eval()
-        check_gradients(dW_pos_exp, dW_pos_act, corr_tol=0.8)
+        check_gradients(dW_pos_exp, dW_pos_act, corr_tol=tol)
 
         dvb_pos_exp = -np.mean(X.eval(), axis=0)
         dvb_pos_act = pos_grads[visible_layer.bias].eval()
-        check_gradients(dvb_pos_exp, dvb_pos_act)
+        check_gradients(dvb_pos_exp, dvb_pos_act, corr_tol=tol)
 
         dvh_pos_exp = -np.mean(P_H0_given_X.eval(), axis=0)
         dvh_pos_act = pos_grads[hidden_layer.b].eval()
-        check_gradients(dvh_pos_exp, dvh_pos_act)
+        check_gradients(dvh_pos_exp, dvh_pos_act, corr_tol=tol)
+
+        return pos_grads, updates
 
     @staticmethod
-    def check_rbm_neg_phase(rbm, cost, X, theano_rng):
-        neg_grads, _ = cost._get_negative_phase(rbm, X)
-        
+    def check_rbm_neg_phase(rbm, cost, X, theano_rng, tol=0.85):
+        neg_grads, updates = cost._get_negative_phase(rbm, X)
+
         visible_layer = rbm.visible_layer
         hidden_layer = rbm.hidden_layers[0]
 
@@ -1151,32 +1177,24 @@ class Test_CD(object):
                                                state_above=None, layer_above=None)[1]
         dW_neg_act = neg_grads[hidden_layer.transformer.get_params()[0]].eval()
         dW_neg_exp = np.dot(V1.eval().T, P_H1_given_V1.eval()) / rbm.batch_size
-        check_gradients(dW_neg_exp, dW_neg_act, corr_tol=0.85)
+        check_gradients(dW_neg_exp, dW_neg_act, corr_tol=tol)
 
         dvb_neg_exp = np.mean(V1.eval(), axis=0)
         dvb_neg_act = neg_grads[visible_layer.bias].eval()
-        check_gradients(dvb_neg_exp, dvb_neg_act)
+        check_gradients(dvb_neg_exp, dvb_neg_act, corr_tol=tol)
 
         dvh_neg_exp = np.mean(P_H1_given_V1.eval(), axis=0)
         dvh_neg_act = neg_grads[hidden_layer.b].eval()
-        check_gradients(dvh_neg_exp, dvh_neg_act)
+        check_gradients(dvh_neg_exp, dvh_neg_act, corr_tol=tol)
+
+        return neg_grads, updates
 
     def test_rbm(self, num_visible=100, num_hidden=50, batch_size=5000, variational=False):
-        rng = np.random.RandomState([2012,11,3])
+        rng = np.random.RandomState([2014,10,7])
         theano_rng = MRG_RandomStreams(2024+30+9)
 
         # Set up the RBM (One hidden layer DBM)
-        visible_layer = BinaryVector(nvis=num_visible)
-        visible_layer.set_biases(rng.uniform(-1., 1., (num_visible,)).astype(config.floatX))
-        hidden_layer = BinaryVectorMaxPool(detector_layer_dim=num_hidden,
-                                           pool_size=1,
-                                           layer_name='h',
-                                           irange=0.05,
-                                           init_bias=-2.0)
-        hidden_layer.set_biases(rng.uniform(-1., 1., (num_hidden,)).astype(config.floatX))
-        model = RBM(visible_layer=visible_layer,
-                    hidden_layer=hidden_layer,
-                    batch_size=batch_size, niter=1)
+        rbm = make_rbm(num_visible, num_hidden, batch_size, rng=rng)
 
         if variational:
             cost = VariationalCD(num_gibbs_steps=1)
@@ -1186,9 +1204,9 @@ class Test_CD(object):
         # Set the data
         X = sharedX(rng.randn(batch_size, num_visible))
         # Get the gradients from the cost function
-        grads, updates = cost.get_gradients(model, X)
-        Test_CD.check_rbm_pos_phase(model, cost, X)
-        Test_CD.check_rbm_neg_phase(model, cost, X, theano_rng)
+        grads, updates = cost.get_gradients(rbm, X)
+        Test_CD.check_rbm_pos_phase(rbm, cost, X)
+        Test_CD.check_rbm_neg_phase(rbm, cost, X, theano_rng)
 
     def test_rbm_varational(self, num_visible=100, num_hidden=50, batch_size=200):
         self.test_rbm(num_visible, num_hidden, batch_size, variational=True)
@@ -1236,4 +1254,3 @@ def test_extra():
         return
     from galatea.dbm.pylearn2_bridge import run_unit_tests
     run_unit_tests()
-
