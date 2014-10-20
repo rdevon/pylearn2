@@ -2,6 +2,7 @@ from pylearn2.costs.dbm import BaseCD
 from pylearn2.costs.dbm import VariationalCD
 from pylearn2.costs import dbm as dbm_cost
 
+from pylearn2.expr.nnet import sigmoid_numpy
 from pylearn2.models.dbn import DBN
 from pylearn2.models.dbm.dbm import RBM
 from pylearn2.models.tests.test_dbm import make_rbm
@@ -21,13 +22,23 @@ config.exception_verbosity='high'
 class Test_DBN_Basics(object):
     @staticmethod
     def make_basic_dbn(dims = [100, 150, 200],
-                                       batch_sizes=[5, 23]):
-        rbm1 = make_rbm(dims[0], dims[1], batch_sizes[0])
-        rbm2 = make_rbm(dims[1], dims[2], batch_sizes[1])
+                                       batch_sizes=[5, 23],
+                                       center=False):
+        rbm1 = make_rbm(dims[0], dims[1], batch_sizes[0], center=center)
+        rbm2 = make_rbm(dims[1], dims[2], batch_sizes[1], center=False)
         dbn = DBN(rbm1, rbm2)
         for layer1, layer2 in zip(rbm2.hidden_layers, dbn.hidden_layers):
             assert layer1 == layer2
         assert rbm2.visible_layer == dbn.visible_layer
+        lower_hidden = dbn.rbms[0].hidden_layers[0]
+        upper_visible = dbn.rbms[1].visible_layer
+        assert lower_hidden.detector_layer_dim == upper_visible.nvis
+        assert lower_hidden.center == upper_visible.center
+        assert np.all(lower_hidden.get_biases() == upper_visible.get_biases())
+        if upper_visible.center:
+            assert np.all(lower_hidden.offset.eval() == upper_visible.offset.eval()),\
+                "Offsets do not match: \n%r\n%r" %\
+                (lower_hidden.offset.eval(), upper_visible.offset.eval())
 
         return dbn
 
@@ -39,8 +50,15 @@ class Test_DBN_Basics(object):
         return dbn
 
     def test_basic_dbn(self, dims = [100, 200, 100],
+                                   batch_sizes=[5, 23],
+                                   center=False):
+        dbn = Test_DBN_Basics.make_basic_dbn(dims, batch_sizes, center=center)
+        assert dbn is not None
+        return dbn
+
+    def test_basic_dbn_with_centering(self, dims = [10, 20, 30],
                                    batch_sizes=[5, 23]):
-        dbn = Test_DBN_Basics.make_basic_dbn(dims, batch_sizes)
+        dbn = self.test_basic_dbn(dims, batch_sizes, center=True)
         assert dbn is not None
 
     def test_deeper_dbn(self, dims = [100, 150, 200, 250], batch_sizes=[5, 13, 23]):

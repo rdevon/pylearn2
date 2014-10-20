@@ -1,5 +1,7 @@
 import numpy as np
+import warnings
 
+from pylearn2.expr.nnet import sigmoid_numpy
 from pylearn2.models import mlp
 from pylearn2.models import Model
 from pylearn2.models.dbm import layer as dbm_layer
@@ -10,6 +12,7 @@ from pylearn2.space import Conv2DSpace
 from pylearn2.utils import sharedX
 
 from theano.sandbox.rng_mrg import MRG_RandomStreams
+
 
 class DBN(Model):
     """
@@ -46,6 +49,18 @@ class DBN(Model):
                              " and visible layer of top RBM (%r vs %r)"
                              % (type(lower_hidden_layer), type(upper_visible_layer)))
 
+    @staticmethod
+    def match_layers(lower_hidden, upper_visible):
+        DBN.check_layers(lower_hidden, upper_visible)
+        if isinstance(lower_hidden, dbm_layer.BinaryVectorMaxPool):
+            upper_visible.center = lower_hidden.center
+            upper_visible.set_biases(lower_hidden.get_biases())
+            if upper_visible.center:
+                upper_visible.offset = sharedX(sigmoid_numpy(upper_visible.bias.get_value()))
+        else:
+            raise NotImplementedError("Cannot yet handle %r hidden with %r visible"
+                                                         % (type(lower_hidden), type(upper_visible)))
+
     def __init__(self, lower_model, rbm,
                         forward_method=None,
                         theano_rng=None):
@@ -63,7 +78,7 @@ class DBN(Model):
             raise ValueError("lower model must be RBM or DBN, not %r" % type(lower_model))
         # Check RBM structure
         for i in range(len(self.rbms) - 1):
-            DBN.check_layers(self.rbms[i].hidden_layers[0], self.rbms[i+1].visible_layer)
+            DBN.match_layers(self.rbms[i].hidden_layers[0], self.rbms[i+1].visible_layer)
 
         # Set the top RBM for inference / sampling procedures / etc
         self.top_rbm = self.rbms[-1]

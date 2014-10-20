@@ -1112,7 +1112,7 @@ def check_gradients(expected_grad, actual_grad, corr_tol=0.8, mean_tol=0.05):
             "Mean did not pass (%.2f expected vs %.2f actual)" %\
             (np.mean(expected_grad), np.mean(actual_grad))
 
-def make_rbm(num_visible, num_hidden, batch_size, rng=None):
+def make_rbm(num_visible, num_hidden, batch_size, center=False, rng=None):
     if rng is None:
         rng = np.random.RandomState([2014,10,7])
 
@@ -1122,8 +1122,9 @@ def make_rbm(num_visible, num_hidden, batch_size, rng=None):
                                                                 pool_size=1,
                                                                 layer_name='h',
                                                                 irange=0.05,
-                                                                init_bias=-2.0)
-    hidden_layer.set_biases(rng.uniform(-1., 1., (num_hidden,)).astype(config.floatX))
+                                                                init_bias=-2.0,
+                                                                center=center)
+    hidden_layer.set_biases(rng.uniform(-1., 1., (num_hidden,)).astype(config.floatX), recenter=center)
     model = RBM(visible_layer=visible_layer,
                            hidden_layer=hidden_layer,
                            batch_size=batch_size, niter=1)
