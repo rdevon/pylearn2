@@ -12,17 +12,16 @@ import logging
 import numpy as np
 import warnings
 
-from theano.compat import OrderedDict
 from theano import tensor as T, config
+from theano.compat import OrderedDict
+from theano.sandbox.rng_mrg import MRG_RandomStreams
 
 from pylearn2.models import Model
 from pylearn2.models.dbm import flatten
 from pylearn2.models.dbm.inference_procedure import WeightDoubling
 from pylearn2.models.dbm.inference_procedure import UpDown
-from pylearn2.models.dbm import layer
 from pylearn2.models.dbm.sampling_procedure import GibbsEvenOdd
 from pylearn2.models.dbm.sampling_procedure import GibbsOddEven
-from pylearn2.models import mlp
 from pylearn2.utils import safe_zip, safe_izip
 from pylearn2.utils.rng import make_np_rng
 
@@ -426,7 +425,7 @@ class DBM(Model):
         .. todo::
 
             WRITEME
-        """        
+        """
         return self.hidden_layers[0].get_weights_topo()
 
     def make_layer_to_state(self, num_examples, rng=None):
@@ -717,6 +716,31 @@ class DBM(Model):
         self.setup_inference_procedure()
         return self.inference_procedure.do_inpainting(*args, **kwargs)
 
+    def initialize_chains(self, X, Y, theano_rng):
+        # Initializing to data
+        layer_to_clamp = OrderedDict([(self.visible_layer, True)])
+        layer_to_chains = self.make_layer_to_symbolic_state(1, theano_rng)
+        # initialized the visible layer to data
+        layer_to_chains[self.visible_layer] = X
+        # if supervised, also clamp targets
+        if Y is not None and self.supervised:
+            # note: if the Y layer changes to something without linear energy,
+            # we'll need to make the expected energy clamp Y in the positive
+            # phase
+            target_layer = self.hidden_layers[-1]
+            assert isinstance(target_layer, Softmax)
+            layer_to_clamp[target_layer] = True
+            layer_to_chains[target_layer] = Y
+
+        # Note that we replace layer_to_chains with a dict mapping to the new
+        # state of the chains
+        # We first initialize the chain by clamping the visible layer and the
+        # target layer (if it exists)
+        layer_to_chains = self.sampling_procedure.sample(layer_to_chains,
+                                                                                          theano_rng,
+                                                                                          layer_to_clamp=layer_to_clamp,
+                                                                                          num_steps=1)
+        return layer_to_chains
 
 class RBM(DBM):
     """
@@ -746,27 +770,3 @@ class RBM(DBM):
         super(RBM, self).__init__(batch_size, visible_layer, [hidden_layer], niter,
                                   inference_procedure=UpDown(), sampling_procedure=GibbsOddEven())
 
-
-class DBN(model):
-    def __init__(self, batch_size, rbm, lower_model):
-        self.top_rbm = [rbm]
-        if isinstance(lower_model, RBM):
-            self.rbms = [lower_model, rbm]
-        elif isinstance(lower_model, DBN):
-            self.rbms = lower_model.rbms + [rbm]
-        self.mlp_layers = [l.make_shared_mlp_layer() for l in rbms]
-        
-
-def mlp_from_dbm(dbm):
-    """
-    MLP with parameters pretrained from a DBM.
-    """
-
-    def __init__(self, dbm):
-        layers = []
-        for layer in dbm.hidden_layers:
-            mlp_layer = layer.make_mlp_layer()
-            layers.append(mlp_layer)
-        super(MLP_From_DBM, self).__init__(layers=layers,
-                                           batch_size=self.batch_size,
-                                           input_space=visible_layer.space)

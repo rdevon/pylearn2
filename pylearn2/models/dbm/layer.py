@@ -928,7 +928,6 @@ class BinaryVectorMaxPool(HiddenLayer):
         rows = total / cols
         return rows, cols
 
-
     def get_weights_topo(self):
         """
         .. todo::
@@ -1467,10 +1466,11 @@ class BinaryVectorMaxPool(HiddenLayer):
                                      b_lr_scale=self.b_lr_scale,
                                      mask_weights=self.mask_weights,
                                      max_col_norm=self.max_col_norm)
-        mlp_layer.W = self.W
+        mlp_layer.transformer  = self.transformer
+
         mlp_layer.b = self.b
         return mlp_layer
-    
+
 
 class Softmax(HiddenLayer):
     """

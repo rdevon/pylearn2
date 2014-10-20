@@ -2,6 +2,7 @@
 *~
 *.swp
 *.bak
+*.komodoproject
 
 #Don't track the binary data files:
 *.npy
