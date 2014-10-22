@@ -12,7 +12,8 @@ from pylearn2.space import Conv2DSpace
 from pylearn2.utils import sharedX
 
 from theano.sandbox.rng_mrg import MRG_RandomStreams
-
+import theano.tensor as T
+from theano.tensor.extra_ops import fill_diagonal
 
 class DBN(Model):
     """
@@ -114,7 +115,7 @@ class DBN(Model):
         self.sampling_procedure = DBN_Sampling_Procedure()
         self.sampling_procedure.dbn = self
 
-    def feed_forward(self, X, Y=None, method=None, level=None, theano_rng=None):
+    def feed_forward(self, X, Y=None, method=None, to_level=None, theano_rng=None):
         """
         DBN needs to feed forward through the layers first before working with the top.
         """
@@ -129,8 +130,9 @@ class DBN(Model):
             theano_rng = self.theano_rng
 
         state_below = None
+        # Iterate through all RBMs except the top one when feeding forward.
         for i, rbm in enumerate(self.rbms[:-1]):
-            if level is not None and i > level:
+            if to_level is not None and i > to_level:
                 break
             if i == 0:
                 state_below = rbm.visible_layer.upward_state(X)
@@ -233,7 +235,7 @@ class DBN(Model):
     def get_weights_topo(self, level=0):
         raise NotImplementedError()
 
-    def get_weights2(self, level=0):
+    def get_weights2(self, level=0, niter=10):
         """
         .. todo::
 
@@ -241,8 +243,23 @@ class DBN(Model):
         """
         assert level < len(self.rbms)
         rbm = self.rbms[level]
-        state = sharedX(10*np.identity(rbm.hidden_layers[0].detector_layer_dim))
 
+        # Hacking a mf inference on the top level (or smapling maybe)
+        # We need the identity to set each hidden unit for its batch.
+        identity = sharedX(np.identity(rbm.hidden_layers[0].detector_layer_dim))
+        state = identity.copy()
+        layer_above = rbm.hidden_layers[0]
+        layer_below = rbm.visible_layer
+
+        for s in xrange(niter):
+            state_above = layer_above.downward_state(state)
+            state_below = layer_below.upward_state(layer_below.mf_update(state_above))
+            # Set the diagonal to the offset + 1 if centered, else 1
+            fill_diagonal(state_above, 1)
+            state = layer_above.mf_update(state_below,
+                                          state_above=None)
+
+        state = state[0]
         if level > 0:
             state = self.generate(rbm, state, to_level=1)
         hidden = self.rbms[0].hidden_layers[0]
@@ -252,7 +269,7 @@ class DBN(Model):
     def get_weights(self, level=0):
         state = sharedX(np.identity(self.rbms[0].visible_layer.nvis))
         if level > 0:
-            state = self.feed_forward(state, method="MF", level=level-1)
+            state = self.feed_forward(state, method="MF", to_level=level-1)
         W = self.rbms[level].hidden_layers[0].transformer.lmul(state)
         return W.eval()
 
@@ -279,6 +296,7 @@ class DBN_Inference_Procedure(InferenceProcedure):
         dbn = self.dbn
         X_hat = dbn.feed_forward(X, method="MF")
         return dbn.top_rbm.inference_procedure.mf(X_hat, Y, return_history, niter, block_grad)
+
 
 class DBN_Sampling_Procedure(SamplingProcedure):
 
