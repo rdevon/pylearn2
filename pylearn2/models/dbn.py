@@ -234,7 +234,7 @@ class DBN(Model):
     def get_weights_topo(self, level=0):
         raise NotImplementedError()
 
-    def get_weights2(self, level=0, method="MF", niter=100):
+    def get_weights2(self, level=0, method="SAMPLING", niter=100):
         """
         .. todo::
 
@@ -266,7 +266,6 @@ class DBN(Model):
                                                          state_above=None)
 
             state = fill_diagonal(state[0], 1), state[1]
-        print state[0].eval()
 
         state = state[0]
         if level > 0:
