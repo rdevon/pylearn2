@@ -12,7 +12,6 @@ from pylearn2.space import Conv2DSpace
 from pylearn2.utils import sharedX
 
 from theano.sandbox.rng_mrg import MRG_RandomStreams
-import theano.tensor as T
 from theano.tensor.extra_ops import fill_diagonal
 
 class DBN(Model):
@@ -235,7 +234,7 @@ class DBN(Model):
     def get_weights_topo(self, level=0):
         raise NotImplementedError()
 
-    def get_weights2(self, level=0, niter=10):
+    def get_weights2(self, level=0, method="MF", niter=100):
         """
         .. todo::
 
@@ -247,17 +246,27 @@ class DBN(Model):
         # Hacking a mf inference on the top level (or smapling maybe)
         # We need the identity to set each hidden unit for its batch.
         identity = sharedX(np.identity(rbm.hidden_layers[0].detector_layer_dim))
-        state = identity.copy()
+        state = None, identity.copy()
         layer_above = rbm.hidden_layers[0]
         layer_below = rbm.visible_layer
 
         for s in xrange(niter):
             state_above = layer_above.downward_state(state)
-            state_below = layer_below.upward_state(layer_below.mf_update(state_above))
-            # Set the diagonal to the offset + 1 if centered, else 1
-            fill_diagonal(state_above, 1)
-            state = layer_above.mf_update(state_below,
-                                          state_above=None)
+            if method == "SAMPLING":
+                state_below = layer_below.upward_state(layer_below.sample(state_below=None, state_above=state_above,
+                                                                                                                layer_above=layer_above,
+                                                                                                                theano_rng=self.theano_rng))
+                #   Set the diagonal to the offset + 1 if centered, else 1
+                state = layer_above.sample(state_below,
+                                                         state_above=None, theano_rng=self.theano_rng)
+            elif method == "MF":
+                state_below = layer_below.upward_state(layer_below.mf_update(state_above,
+                                                                                                                layer_above))
+                state = layer_above.mf_update(state_below,
+                                                         state_above=None)
+
+            state = fill_diagonal(state[0], 1), state[1]
+        print state[0].eval()
 
         state = state[0]
         if level > 0:
