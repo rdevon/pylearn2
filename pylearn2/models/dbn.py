@@ -264,7 +264,9 @@ class DBN(Model):
                                                                                                                 layer_above))
                 state = layer_above.mf_update(state_below,
                                                          state_above=None)
-
+            if s == niter - 1:
+                state = layer_above.mf_update(state_below,
+                                                                   state_above=None)
             state = fill_diagonal(state[0], 1), state[1]
 
         state = state[0]
