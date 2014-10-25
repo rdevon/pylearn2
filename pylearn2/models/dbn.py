@@ -21,7 +21,7 @@ class DBN(Model):
     Parameters
     ----------
     lower_model : DBN or RBM
-        DBN is built out of a DBN or RBM. These will be used for the forward inference.
+        DBN is built out of a DBN or RBM.
     rbm : RBM
         The top rbm for the model. Used for generative learning.
     forward_inference_procedure: string
@@ -36,13 +36,16 @@ class DBN(Model):
 
     @staticmethod
     def check_layers(lower_hidden_layer, upper_visible_layer):
-        if isinstance(lower_hidden_layer, dbm_layer.BinaryVectorMaxPool) and lower_hidden_layer.pool_size != 1:
-            raise NotImplementedError("%r does not support pooling layers yet" % type(self))
+        if isinstance(lower_hidden_layer, dbm_layer.BinaryVectorMaxPool)\
+            and lower_hidden_layer.pool_size != 1:
+            raise NotImplementedError("%r does not support pooling layers yet"
+                                      % type(self))
 
         if lower_hidden_layer.detector_layer_dim != upper_visible_layer.nvis:
             raise ValueError("Dimension of lower RBM hidden layer"
                              "do not match visible layer of top RBM (%d vs %d)"
-                             % (lower_hidden_layer.detector_layer_dim, upper_visible_layer.nvis))
+                             % (lower_hidden_layer.detector_layer_dim,
+                                upper_visible_layer.nvis))
 
         if type(lower_hidden_layer) != DBN.visible_hidden_dict[type(upper_visible_layer)]:
             raise ValueError("Type mismatch of lower RBM hidden layer"
@@ -56,29 +59,47 @@ class DBN(Model):
             upper_visible.center = lower_hidden.center
             upper_visible.set_biases(lower_hidden.get_biases())
             if upper_visible.center:
-                upper_visible.offset = sharedX(sigmoid_numpy(upper_visible.bias.get_value()))
+                upper_visible.offset = sharedX(sigmoid_numpy(
+                    upper_visible.bias.get_value()))
         else:
-            raise NotImplementedError("Cannot yet handle %r hidden with %r visible"
-                                                         % (type(lower_hidden), type(upper_visible)))
+            raise NotImplementedError(
+                "Cannot yet handle %r hidden with %r visible"
+                % (type(lower_hidden), type(upper_visible)))
 
-    def __init__(self, lower_model, rbm,
+    def __init__(self, lower_model, top_model,
                         forward_method=None,
                         theano_rng=None):
 
         self.forward_method = forward_method
 
-        # The other RBMs are used to derive the forward pass MLP as well as get reconstructions.
+        # The other RBMs are used to derive the forward pass MLP
+        # as well as get reconstructions.
         if isinstance(lower_model, RBM):
-            self.rbms = [lower_model] + [rbm]
+            self.rbms = [lower_model]
             self.input_space = lower_model.visible_layer.space
         elif isinstance(lower_model, DBN):
-            self.rbms = lower_model.rbms + [rbm]
+            self.rbms = lower_model.rbms
             self.input_space = lower_model.input_space
         else:
-            raise ValueError("lower model must be RBM or DBN, not %r" % type(lower_model))
+            raise ValueError("lower model must be RBM or DBN, not %r"
+                             % type(lower_model))
+
+        if rbms[-1].label_layer is not None:
+            rbms[-1].hidden_layers = [h for h in rbms[-1].hidden_layers
+                                      if h != label_layer]
+
+            rbms[-1].label_layer = None
+
+        if isinstance(top_model, RBM):
+            self.rbms += [top_model]
+        else:
+            raise ValueError("%r as top layer not supported for DBN."
+                             % type(top_model))
+
         # Check RBM structure
         for i in range(len(self.rbms) - 1):
-            DBN.match_layers(self.rbms[i].hidden_layers[0], self.rbms[i+1].visible_layer)
+            DBN.match_layers(self.rbms[i].hidden_layers[0],
+                             self.rbms[i+1].visible_layer)
 
         # Set the top RBM for inference / sampling procedures / etc
         self.top_rbm = self.rbms[-1]
@@ -97,13 +118,13 @@ class DBN(Model):
             rbm.visible_layer.layer_name = "dbn_rbm_%d_v" % i
             rbm.hidden_layers[0].layer_name = "dbn_rbm_%d_h" % i
 
-        # Create an mlp with corresponding layers and shared variables as parameters.
+        # Create an mlp with corresponding layers and
+        # shared variables as parameters.
         mlp_layers = []
         for i, rbm in enumerate(self.rbms):
             mlp_layers.append(mlp.PretrainedLayer("mlp_layer_%d" % i,
                 rbm.hidden_layers[0].make_shared_mlp_layer()))
-        self.mlp = mlp.MLP(mlp_layers,
-                                        batch_size=self.top_rbm.batch_size)
+        self.mlp = mlp.MLP(mlp_layers, batch_size=self.top_rbm.batch_size)
 
         # DBN needs some extra members from RBM
         self.visible_layer = self.top_rbm.visible_layer
@@ -116,14 +137,15 @@ class DBN(Model):
 
     def feed_forward(self, X, Y=None, method=None, level=None, theano_rng=None):
         """
-        DBN needs to feed forward through the layers first before working with the top.
+        DBN needs to feed forward through the layers before learning.
         """
 
         if self.forward_method is not None:
             method = self.forward_method
 
         if method not in ["MF", "SAMPLING"]:
-            raise ValueError("Forward methods supported are MF or SAMPLING, not %r" % method)
+            raise ValueError("Forward methods supported are"
+                             "MF or SAMPLING, not %r" % method)
 
         if theano_rng is None:
             theano_rng = self.theano_rng
@@ -138,9 +160,11 @@ class DBN(Model):
                 assert state_below is not None
 
             if method == "MF":
-                state = rbm.hidden_layers[0].mf_update(state_below, state_above=None)
+                state = rbm.hidden_layers[0].mf_update(state_below,
+                                                       state_above=None)
             elif method == "SAMPLING":
-                state = rbm.hidden_layers[0].sample(state_below, theano_rng=theano_rng)
+                state = rbm.hidden_layers[0].sample(state_below,
+                                                    theano_rng=theano_rng)
             state_below = rbm.hidden_layer.upward_state(state)
 
         return state_below
@@ -171,10 +195,11 @@ class DBN(Model):
     def get_sampling_updates(self, layer_to_state, theano_rng,
                                                layer_to_clamp=None, num_steps=1,
                                                return_layer_to_updated=False):
-        return self.top_rbm.get_sampling_updates(layer_to_state, theano_rng,
-                                                               layer_to_clamp=layer_to_clamp,
-                                                               num_steps=num_steps,
-                                                               return_layer_to_updated=return_layer_to_updated)
+        return self.top_rbm.get_sampling_updates(
+            layer_to_state, theano_rng,
+            layer_to_clamp=layer_to_clamp,
+            num_steps=num_steps,
+            return_layer_to_updated=return_layer_to_updated)
 
     def energy(self, X, hidden):
         return self.top_rbm.energy(X, hidden)
@@ -252,20 +277,19 @@ class DBN(Model):
         for s in xrange(niter):
             state_above = layer_above.downward_state(state)
             if method == "SAMPLING":
-                state_below = layer_below.upward_state(layer_below.sample(state_below=None, state_above=state_above,
-                                                                                                                layer_above=layer_above,
-                                                                                                                theano_rng=self.theano_rng))
+                state_below = layer_below.upward_state(layer_below.sample(
+                    state_below=None, state_above=state_above,
+                    layer_above=layer_above, theano_rng=self.theano_rng))
                 #   Set the diagonal to the offset + 1 if centered, else 1
                 state = layer_above.sample(state_below,
-                                                         state_above=None, theano_rng=self.theano_rng)
+                                           state_above=None,
+                                           theano_rng=self.theano_rng)
             elif method == "MF":
-                state_below = layer_below.upward_state(layer_below.mf_update(state_above,
-                                                                                                                layer_above))
-                state = layer_above.mf_update(state_below,
-                                                         state_above=None)
+                state_below = layer_below.upward_state(
+                    layer_below.mf_update(state_above, layer_above))
+                state = layer_above.mf_update(state_below, state_above=None)
             if s == niter - 1:
-                state = layer_above.mf_update(state_below,
-                                                                   state_above=None)
+                state = layer_above.mf_update(state_below, state_above=None)
             state = fill_diagonal(state[0], 1), state[1]
 
         state = state[0]
@@ -301,17 +325,22 @@ class DBN(Model):
 
 class DBN_Inference_Procedure(InferenceProcedure):
 
-    def mf(self, X, Y = None, return_history=False, niter=None, block_grad=None):
+    def mf(self, X, Y = None, return_history=False,
+           niter=None, block_grad=None):
         dbn = self.dbn
         X_hat = dbn.feed_forward(X, method="MF")
-        return dbn.top_rbm.inference_procedure.mf(X_hat, Y, return_history, niter, block_grad)
+        return dbn.top_rbm.inference_procedure.mf(X_hat, Y, return_history,
+                                                  niter, block_grad)
 
 class DBN_Sampling_Procedure(SamplingProcedure):
 
-    def sample(self, layer_to_state, theano_rng, layer_to_clamp=None, num_steps=1):
+    def sample(self, layer_to_state, theano_rng,
+               layer_to_clamp=None, num_steps=1):
         dbn = self.dbn
         X = layer_to_state[dbn.visible_layer]
         X_hat = dbn.feed_forward(X, method="SAMPLING")
         layer_to_state[dbn.visible_layer] = X_hat
-        return dbn.top_rbm.sampling_procedure.sample(layer_to_state, theano_rng,
-                                                                                      layer_to_clamp, num_steps)
+        return dbn.top_rbm.sampling_procedure.sample(layer_to_state,
+                                                     theano_rng,
+                                                     layer_to_clamp,
+                                                     num_steps)
