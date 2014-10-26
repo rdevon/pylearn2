@@ -1167,7 +1167,7 @@ class UpDown(InferenceProcedure):
         history = [ list(H_hat) ]
 
         #we only need recurrent inference if there are multiple layers
-        assert (niter > 1) == (len(dbm.hidden_layers) > 1)
+#        assert (niter > 1) == (len(dbm.hidden_layers) > 1)
 
         for i in xrange(niter):
             # Determine whether to go up or down on this iteration

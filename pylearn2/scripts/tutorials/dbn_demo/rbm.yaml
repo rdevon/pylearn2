@@ -54,6 +54,12 @@
                 # We initialize all the biases of the hidden units to a negative
                 # number. This helps to learn a sparse representation.
                 init_bias: 0.,
+            },
+        label_layer:
+            !obj:pylearn2.models.dbm.Softmax {
+                layer_name: 'y',
+                n_classes: 10,
+                sparse_init: 1
             }
     },
     # We train the model using stochastic gradient descent.
@@ -80,7 +86,8 @@
                         # The cost function is contrastive divergence.
                         # For the RBM, the variational approximation is exact.
                         !obj:pylearn2.costs.dbm.BaseCD {
-                            num_gibbs_steps: 1
+                            num_gibbs_steps: 1,
+                            supervised: True
                         },
                        ],
            },
