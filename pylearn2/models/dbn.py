@@ -22,11 +22,11 @@ class DBN(Model):
     ----------
     lower_model : DBN or RBM
         DBN is built out of a DBN or RBM.
-    rbm : RBM
+    top_model : RBM
         The top rbm for the model. Used for generative learning.
-    forward_inference_procedure: string
+    forward_inference_procedure: string, optional
         "SAMPLING" or "MF". Indicates the method used for forward inference.
-    theano_rng: TODO
+    theano_rng: WRITEME
     """
 
     # We use this dicitonary to map rbm visible layers to hidden layer.
@@ -36,6 +36,10 @@ class DBN(Model):
 
     @staticmethod
     def check_layers(lower_hidden_layer, upper_visible_layer):
+        """
+        Checks if concurrent RBM layers are consistent.
+        """
+
         if isinstance(lower_hidden_layer, dbm_layer.BinaryVectorMaxPool)\
             and lower_hidden_layer.pool_size != 1:
             raise NotImplementedError("%r does not support pooling layers yet"
@@ -54,6 +58,10 @@ class DBN(Model):
 
     @staticmethod
     def match_layers(lower_hidden, upper_visible):
+        """
+        Matches concurrent RBM layer properties.
+        """
+
         DBN.check_layers(lower_hidden, upper_visible)
         if isinstance(lower_hidden, dbm_layer.BinaryVectorMaxPool):
             upper_visible.center = lower_hidden.center
@@ -84,11 +92,11 @@ class DBN(Model):
             raise ValueError("lower model must be RBM or DBN, not %r"
                              % type(lower_model))
 
-        if rbms[-1].label_layer is not None:
-            rbms[-1].hidden_layers = [h for h in rbms[-1].hidden_layers
+        if self.rbms[-1].label_layer is not None:
+            self.rbms[-1].hidden_layers = [h for h in self.rbms[-1].hidden_layers
                                       if h != label_layer]
 
-            rbms[-1].label_layer = None
+            self.rbms[-1].label_layer = None
 
         if isinstance(top_model, RBM):
             self.rbms += [top_model]
@@ -118,14 +126,6 @@ class DBN(Model):
             rbm.visible_layer.layer_name = "dbn_rbm_%d_v" % i
             rbm.hidden_layers[0].layer_name = "dbn_rbm_%d_h" % i
 
-        # Create an mlp with corresponding layers and
-        # shared variables as parameters.
-        mlp_layers = []
-        for i, rbm in enumerate(self.rbms):
-            mlp_layers.append(mlp.PretrainedLayer("mlp_layer_%d" % i,
-                rbm.hidden_layers[0].make_shared_mlp_layer()))
-        self.mlp = mlp.MLP(mlp_layers, batch_size=self.top_rbm.batch_size)
-
         # DBN needs some extra members from RBM
         self.visible_layer = self.top_rbm.visible_layer
         self.hidden_layers = self.top_rbm.hidden_layers
@@ -135,9 +135,51 @@ class DBN(Model):
         self.sampling_procedure = DBN_Sampling_Procedure()
         self.sampling_procedure.dbn = self
 
+    @staticmethod
+    def create_mlp(rbms, top_layer=None):
+        """
+        Create an mlp from a set of rbms and an optional top layer.
+
+        Parameters
+        ----------
+        rbms: list of dbm.RBM
+            List of rbms from which to form feed forward layers from.
+        top_layer: mlp.Layer, optional
+            optional top layer.
+        """
+        mlp_layers = []
+        top_rbm = rbms[-1]
+        for i, rbm in enumerate(rbms):
+            assert isinstance(rbm, RBM), "Only RBMs supported."
+            layer = rbm.hidden_layers[0].make_shared_mlp_layer()
+
+            #layer.layer_content.input_space = rbm.visible_layer.input_space
+            #layer.layer_content.output_space = rbm.hidden_layers[0].output_space
+
+            mlp_layers.append(layer)
+        if top_layer is not None:
+            mlp_layers.append(top_layer)
+        model = mlp.MLP(mlp_layers,
+                        input_space=rbms[0].visible_layer.input_space,
+                        batch_size=top_rbm.batch_size)
+
+        return model
+
     def feed_forward(self, X, Y=None, method=None, level=None, theano_rng=None):
         """
         DBN needs to feed forward through the layers before learning.
+
+        Parameters
+        ----------
+        X: tensor-like
+            input on the bottom rbm visible layer.
+        Y: tensor-like: WRITEME
+            not used yet.
+        method: string
+            "MF" for mean field or "SAMPLING" for sampling.
+        level: int
+            level to feed forward to
+        theano_rng: WRITEME
         """
 
         if self.forward_method is not None:
@@ -170,6 +212,18 @@ class DBN(Model):
         return state_below
 
     def generate(self, source_rbm, state, to_level=0):
+        """
+        Downward pass from a source rbm hidden layer to bottom rbm visible.
+
+        Parameters
+        ----------
+        source_rbm: dbm.RBM
+            rbm from which to generate state.
+        state: theano tensor
+            state on the top hidden layer from which to generate.
+        to_level: int
+            The rbm level to which to generate on the visible layer.
+        """
 
         rbms = []
         for rbm in self.rbms:
@@ -193,8 +247,13 @@ class DBN(Model):
         return state
 
     def get_sampling_updates(self, layer_to_state, theano_rng,
-                                               layer_to_clamp=None, num_steps=1,
-                                               return_layer_to_updated=False):
+                             layer_to_clamp=None, num_steps=1,
+                             return_layer_to_updated=False):
+        """
+        Get sampling updates.
+        Calls RBM.get_sampling_updates().
+        """
+
         return self.top_rbm.get_sampling_updates(
             layer_to_state, theano_rng,
             layer_to_clamp=layer_to_clamp,
@@ -202,25 +261,46 @@ class DBN(Model):
             return_layer_to_updated=return_layer_to_updated)
 
     def energy(self, X, hidden):
+        """
+        Return top_rbm.energy (see dbm.RBM).
+        """
         return self.top_rbm.energy(X, hidden)
 
     def expected_energy(self, X, mf_hidden):
+        """
+        Feeds forward and returns top_rbm.expected_energy (see dbm.RBM).
+        """
         X = self.feed_forward(X, method="MF")
         return self.top_rbm.expected_energy(X, mf_hidden)
 
     def mf(self, *args, **kwargs):
+        """
+        Calls inference procedure.
+        """
         return self.inference_procedure.mf(*args, **kwargs)
 
     def make_layer_to_state(self, num_examples, rng=None):
+        """
+        Returns top_rbm.layer_to_state (see dbm.RBM).
+        """
         return self.top_rbm.make_layer_to_state(num_examples, rng=rng)
 
     def make_layer_to_symbolic_state(self, num_examples, rng=None):
+        """
+        Returns top_rbm.make_layer_to_symbolic_state (see dbm.RBM).
+        """
         return self.top_rbm.make_layer_to_symbolic_state(num_examples, rng=rng)
 
     def get_params(self):
+        """
+        Return top_rbm.get_params (see dbm.RBM).
+        """
         return self.top_rbm.get_params()
 
     def initialize_chains(self, X, Y, theano_rng):
+        """
+        Feeds forward and returns top_rbm.initialize_chains (see dbm.RBM).
+        """
         X_hat = self.feed_forward(X, method="SAMPLING")
         return self.top_rbm.initialize_chains(X_hat, Y, theano_rng)
 
@@ -234,6 +314,10 @@ class DBN(Model):
         return (self.get_input_space(), self.get_input_source())
 
     def get_monitoring_channels(self, data):
+        """
+        Gets the monitoring channels for top_rbm and also reconstructs.
+        """
+
         X = data
         if X is not None:
             X_hat = self.feed_forward(X, method="MF")
@@ -247,15 +331,26 @@ class DBN(Model):
         return rval
 
     def get_input_space(self):
+        """
+        Returns the input space.
+        """
         return self.input_space
 
     def reconstruct(self, V):
+        """
+        Reconstructs to the visible layer of the bottom RBM.
+        """
         X_hat = self.feed_forward(V, method="SAMPLING")
         X_hat_r = self.top_rbm.reconstruct(X_hat)
         V_r = self.generate(self.rbms[-2], X_hat_r)
         return V_r
 
     def get_weights_topo(self, level=0):
+        """
+        .. todo::
+
+        WRITEME
+        """
         raise NotImplementedError()
 
     def get_weights2(self, level=0, method="SAMPLING", niter=100):
@@ -300,6 +395,11 @@ class DBN(Model):
         return W.T.eval()
 
     def get_weights(self, level=0):
+        """
+        .. todo::
+
+            WRITEME
+        """
         state = sharedX(np.identity(self.rbms[0].visible_layer.nvis))
         if level > 0:
             state = self.feed_forward(state, method="MF", level=level-1)
@@ -344,3 +444,12 @@ class DBN_Sampling_Procedure(SamplingProcedure):
                                                      theano_rng,
                                                      layer_to_clamp,
                                                      num_steps)
+
+def mlp_from_dbn(model, top_layer=None):
+    if isinstance(model, RBM):
+        rbms = [model]
+    elif isinstance(model, DBN):
+        rbms = model.rbms
+    else:
+        raise ValueError("Can only make mlp from RBM or DBN, not %r" % type(model))
+    return DBN.create_mlp(rbms, top_layer)
