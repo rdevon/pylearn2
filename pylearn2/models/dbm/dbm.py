@@ -59,10 +59,10 @@ class DBM(Model):
         del self.self
         assert len(hidden_layers) >= 1
 
-        if len(hidden_layers) > 1 and niter <= 1:
-            raise ValueError("with more than one hidden layer, niter needs to "
-                             "be greater than 1; otherwise mean field won't "
-                             "work properly.")
+        #if len(hidden_layers) > 1 and niter <= 1:
+        #    raise ValueError("with more than one hidden layer, niter needs to "
+        #                     "be greater than 1; otherwise mean field won't "
+        #                     "work properly.")
 
         self.setup_rng()
         self.layer_names = set()
@@ -723,23 +723,26 @@ class DBM(Model):
         # initialized the visible layer to data
         layer_to_chains[self.visible_layer] = X
         # if supervised, also clamp targets
-        if Y is not None and self.supervised:
+        if Y is not None:
+            assert self.label_layer is not None
+            layer_to_clamp[self.label_layer] = True
+            layer_to_chains[self.label_layer] = Y
+            """
             # note: if the Y layer changes to something without linear energy,
             # we'll need to make the expected energy clamp Y in the positive
             # phase
             target_layer = self.hidden_layers[-1]
-            assert isinstance(target_layer, Softmax)
             layer_to_clamp[target_layer] = True
             layer_to_chains[target_layer] = Y
-
+            """
         # Note that we replace layer_to_chains with a dict mapping to the new
         # state of the chains
         # We first initialize the chain by clamping the visible layer and the
         # target layer (if it exists)
         layer_to_chains = self.sampling_procedure.sample(layer_to_chains,
-                                                                                          theano_rng,
-                                                                                          layer_to_clamp=layer_to_clamp,
-                                                                                          num_steps=1)
+                                                         theano_rng,
+                                                         layer_to_clamp=layer_to_clamp,
+                                                         num_steps=1)
         return layer_to_chains
 
 class RBM(DBM):
@@ -764,9 +767,9 @@ class RBM(DBM):
         Number of mean field iterations for variational inference
         for the positive phase.
     """
-    def __init__(self, batch_size, visible_layer, hidden_layer, niter):
+    def __init__(self, batch_size, visible_layer, hidden_layer, niter, label_layer=None):
         self.__dict__.update(locals())
         del self.self
-        super(RBM, self).__init__(batch_size, visible_layer, [hidden_layer], niter,
+        hidden_layers = [hidden_layer]
+        super(RBM, self).__init__(batch_size, visible_layer, hidden_layers, niter,
                                   inference_procedure=UpDown(), sampling_procedure=GibbsOddEven())
-

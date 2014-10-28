@@ -1112,7 +1112,7 @@ def check_gradients(expected_grad, actual_grad, corr_tol=0.8, mean_tol=0.05):
             "Mean did not pass (%.2f expected vs %.2f actual)" %\
             (np.mean(expected_grad), np.mean(actual_grad))
 
-def make_rbm(num_visible, num_hidden, batch_size, center=False, rng=None):
+def make_rbm(num_visible, num_hidden, batch_size, n_classes=0, center=False, rng=None):
     if rng is None:
         rng = np.random.RandomState([2014,10,7])
 
@@ -1125,6 +1125,10 @@ def make_rbm(num_visible, num_hidden, batch_size, center=False, rng=None):
                                                                 init_bias=-2.0,
                                                                 center=center)
     hidden_layer.set_biases(rng.uniform(-1., 1., (num_hidden,)).astype(config.floatX), recenter=center)
+    if n_classes > 0:
+        label_layer = Softmax(n_classes=n_classes,
+                              layer_name = 'y',
+                              irange = 1.)
     model = RBM(visible_layer=visible_layer,
                            hidden_layer=hidden_layer,
                            batch_size=batch_size, niter=1)
@@ -1137,11 +1141,17 @@ class Test_CD(object):
     """
 
     @staticmethod
-    def check_rbm_pos_phase(rbm, cost, X, tol=0.8):
+    def check_rbm_pos_phase(rbm, cost, X, Y=None, tol=0.8):
+        if rbm.label_layer is not None:
+            assert Y is not None
+        else:
+            assert Y is None
+
         pos_grads, updates = cost._get_positive_phase(rbm, X)
 
         visible_layer = rbm.visible_layer
         hidden_layer = rbm.hidden_layers[0]
+        label_layer = rbm.label_layer
         P_H0_given_X = hidden_layer.mf_update(state_below=visible_layer.upward_state(X),
                                               state_above=None, layer_above=None)[1]
 
@@ -1160,7 +1170,14 @@ class Test_CD(object):
         return pos_grads, updates
 
     @staticmethod
-    def check_rbm_neg_phase(rbm, cost, X, theano_rng, tol=0.85):
+    def check_rbm_neg_phase(rbm, cost, X, Y=None, theano_rng=None, tol=0.85):
+        if rbm.label_layer is not None:
+            assert Y is not None
+        else:
+            assert Y is None
+
+        assert theano_rng is not None
+
         neg_grads, updates = cost._get_negative_phase(rbm, X)
 
         visible_layer = rbm.visible_layer
@@ -1206,7 +1223,7 @@ class Test_CD(object):
         # Get the gradients from the cost function
         grads, updates = cost.get_gradients(rbm, X)
         Test_CD.check_rbm_pos_phase(rbm, cost, X)
-        Test_CD.check_rbm_neg_phase(rbm, cost, X, theano_rng)
+        Test_CD.check_rbm_neg_phase(rbm, cost, X, theano_rng=theano_rng)
 
     def test_rbm_varational(self, num_visible=100, num_hidden=50, batch_size=200):
         self.test_rbm(num_visible, num_hidden, batch_size, variational=True)
@@ -1241,6 +1258,24 @@ class Test_CD(object):
         nested_args = mapping.nest(theano_args)
 
         grads, updates = cost.get_gradients(model, nested_args)
+"""
+"""
+class TestLabels(object):
+    def test_label_equivalence(self, num_visible=100, num_hidden=50, num_labels=10, batch_size=200):
+        #Tests steps of learning with labels.
+        rng = np.random.RandomState([2014,10,7])
+        theano_rng = MRG_RandomStreams(2024+30+9)
+
+        # Set up the RBM (One hidden layer DBM)
+        rbm = make_rbm(num_visible, num_hidden, num_labels, batch_size, rng=rng)
+
+        cost = BaseCD(num_gibbs_steps=1)
+
+        # Set the data
+        X = sharedX(rng.randn(batch_size, num_visible))
+        Y = sharedX(rng.randint(0,10), batch_size)
+        Test_CD.check_rbm_pos_phase(rbm, cost, X, Y)
+        Test_CD.check_rbm_neg_phase(rbm, cost, X, Y, theano_rng=theano_rng)
 """
 
 def test_extra():

@@ -169,10 +169,6 @@ def variational_positive_phase(model, X, Y, supervised):
     """
     if supervised:
         assert Y is not None
-        # note: if the Y layer changes to something without linear energy,
-        # we'll need to make the expected energy clamp Y in the positive
-        # phase
-        assert isinstance(model.hidden_layers[-1], Softmax)
 
     q = model.mf(X, Y)
 
@@ -227,15 +223,19 @@ def sampling_positive_phase(model, X, Y, supervised, num_gibbs_steps, theano_rng
         # note: if the Y layer changes to something without linear energy,
         #       we'll need to make the expected energy clamp Y in the
         #       positive phase
-        assert isinstance(model.hidden_layers[-1], Softmax)
-        layer_to_clamp[model.hidden_layers[-1]] = True
-        layer_to_pos_samples[model.hidden_layers[-1]] = Y
-        hid = model.hidden_layers[:-1]
+        assert isinstance(model.label_layer, Softmax)
+        #assert isinstance(model.hidden_layers[-1], Softmax)
+        layer_to_clamp[model.label_layer] = True
+        #layer_to_clamp[model.hidden_layers[-1]] = True
+        layer_to_pos_samples[model.label_layer] = Y
+        #layer_to_pos_samples[model.hidden_layers[-1]] = Y
+        #hid = model.hidden_layers[:-1]
     else:
         assert Y is None
-        hid = model.hidden_layers
+        #hid = model.hidden_layers
 
-    for layer in hid:
+    #for layer in hid:
+    for layer in model.hidden_layers:
         mf_state = layer.init_mf_state()
 
         def recurse_zeros(x):

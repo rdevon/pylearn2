@@ -80,7 +80,7 @@
                         # The cost function is contrastive divergence.
                         # For the RBM, the variational approximation is exact.
                         !obj:pylearn2.costs.dbm.BaseCD {
-                            num_gibbs_steps: 1
+                            num_gibbs_steps: 1,
                         },
                        ],
            },
