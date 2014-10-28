@@ -32,9 +32,9 @@ def train(yaml_file, save_path, nvis, hidden, pretrain=None):
     train_yaml(yaml)
 
 def train_rbm():
-    hiddens = [200, 10]
-    names = ["rbm", "mlp"]
-    retrains = [False, True]
+    hiddens = [200, 200, 200, 10]
+    names = ["rbm", "dbn1", "dbn2", "mlp"]
+    retrains = [False, False, True, True]
     p = path.abspath(path.dirname(__file__))
     for i, (hidden, name, retrain) in enumerate(zip(hiddens, names, retrains)):
         yaml_file = path.join(p, name + ".yaml")
