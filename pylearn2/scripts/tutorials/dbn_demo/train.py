@@ -16,7 +16,7 @@ def train_yaml(yaml_file):
     train = yaml_parse.load(yaml_file)
     train.main_loop()
 
-def train(yaml_file, save_path, nvis, hidden):
+def train(yaml_file, save_path, nvis, hidden, pretrain=None):
     yaml = open(yaml_file, "r").read()
     input_dim = 784 # MNIST input size
     hyperparams = {"nvis": nvis,
@@ -24,28 +24,36 @@ def train(yaml_file, save_path, nvis, hidden):
                     "detector_layer_dim": hidden,
                     "monitoring_batches": 10,
                     "train_stop": 50000,
-                    "max_epochs": 300,
-                    "save_path": save_path
+                    "max_epochs": 10,
+                    "save_path": save_path,
+                    "pretrain": pretrain
                   }
     yaml = yaml % hyperparams
     train_yaml(yaml)
 
 def train_rbm():
-    hiddens = [200]
-    yamls = ["rbm.yaml"]
-    retrains = [True]
-    for i, (hidden, yaml, retrain) in enumerate(zip(hiddens, yamls, retrains)):
-        yaml_file = path.join(path.abspath(path.dirname(__file__)), yaml)
-        if not path.isfile(yaml_file):
+    hiddens = [200, 10]
+    names = ["rbm", "mlp"]
+    retrains = [False, True]
+    p = path.abspath(path.dirname(__file__))
+    for i, (hidden, name, retrain) in enumerate(zip(hiddens, names, retrains)):
+        yaml_file = path.join(p, name + ".yaml")
+        pkl_file = path.join(p, name + ".pkl")
+        if not path.isfile(pkl_file):
             retrain = True
+
         if not retrain:
             continue
-        if i == 0:
+        if i == 0 or name == "mlp":
             nvis = 784
         else:
             nvis = hiddens[i-1]
-        save_path = path.abspath(path.dirname(__file__))
-        train(yaml_file, save_path, nvis, hidden)
+        if i > 0:
+            pretrain = path.join(p, names[i-1] + ".pkl")
+        else:
+            pretrain = None
+        save_path = p
+        train(yaml_file, save_path, nvis, hidden, pretrain)
 
 if __name__ == "__main__":
     train_rbm()

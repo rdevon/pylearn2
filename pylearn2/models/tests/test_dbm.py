@@ -1259,12 +1259,10 @@ class Test_CD(object):
 
         grads, updates = cost.get_gradients(model, nested_args)
 """
-
+"""
 class TestLabels(object):
     def test_label_equivalence(self, num_visible=100, num_hidden=50, num_labels=10, batch_size=200):
-        """
-        Tests steps of learning with labels.
-        """
+        #Tests steps of learning with labels.
         rng = np.random.RandomState([2014,10,7])
         theano_rng = MRG_RandomStreams(2024+30+9)
 
@@ -1278,7 +1276,7 @@ class TestLabels(object):
         Y = sharedX(rng.randint(0,10), batch_size)
         Test_CD.check_rbm_pos_phase(rbm, cost, X, Y)
         Test_CD.check_rbm_neg_phase(rbm, cost, X, Y, theano_rng=theano_rng)
-
+"""
 
 def test_extra():
     """

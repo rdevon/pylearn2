@@ -1684,7 +1684,8 @@ class SoftmaxPool(Layer):
         self.h_space = VectorSpace(self.detector_layer_dim)
         self.pool_layer_dim = self.detector_layer_dim / self.pool_size
         self.output_space = VectorSpace(self.pool_layer_dim)
-
+        if hasattr(self, "transformer"):
+            return
         rng = self.mlp.rng
         if self.irange is not None:
             assert self.sparse_init is None
