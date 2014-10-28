@@ -21,8 +21,8 @@
         }
     },
     model: !obj:pylearn2.models.dbn.DBN {
-        lower_model: !pkl: "${PYLEARN2_ROOT}/scripts/tutorials/dbn_demo/rbm.pkl",
-        rbm: !obj:pylearn2.models.dbm.RBM {
+        lower_model: !pkl: %(pretrain)s,
+        top_model: !obj:pylearn2.models.dbm.RBM {
             batch_size: &batch_size %(batch_size)i,
             # 1 mean field iteration reaches convergence in the RBM
             niter: 1,
