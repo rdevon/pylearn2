@@ -1131,7 +1131,7 @@ class MLP(Layer):
         This is useful if cost_from_X is used in a MethodCost.
         """
         space = CompositeSpace((self.get_input_space(),
-                                self.get_output_space()))
+                                self.get_target_space()))
         source = (self.get_input_source(), self.get_target_source())
         return (space, source)
 
@@ -1191,6 +1191,8 @@ class Softmax(Layer):
         can be used as the target space. This allows the softmax to compute
         the cost much more quickly than if it needs to convert the targets
         into a VectorSpace.
+    non_redundant : bool
+        If True, learns only n_classes - 1 biases and weight vectors
     """
 
     def __init__(self, n_classes, layer_name, irange=None,
@@ -1199,9 +1201,15 @@ class Softmax(Layer):
                  b_lr_scale=None, max_row_norm=None,
                  no_affine=False,
                  max_col_norm=None, init_bias_target_marginals=None,
-                 binary_target_dim=None):
+                 binary_target_dim=None, non_redundant=False):
 
         super(Softmax, self).__init__()
+
+        if non_redundant:
+            if init_bias_target_marginals:
+                msg = ("init_bias_target_marginals currently only works "
+                       "with the overcomplete parameterization.")
+                raise NotImplementedError(msg)
 
         if isinstance(W_lr_scale, str):
             W_lr_scale = float(W_lr_scale)
@@ -1222,7 +1230,8 @@ class Softmax(Layer):
 
         self.output_space = VectorSpace(n_classes)
         if not no_affine:
-            self.b = sharedX(np.zeros((n_classes,)), name='softmax_b')
+            self.b = sharedX(np.zeros((n_classes - self.non_redundant,)),
+                             name='softmax_b')
             if init_bias_target_marginals:
 
                 y = init_bias_target_marginals.y
@@ -1245,6 +1254,14 @@ class Softmax(Layer):
         else:
             assert init_bias_target_marginals is None
 
+    def __setstate__(self, state):
+        super(Softmax, self).__setstate__(state)
+        # Patch old pickle files
+        if not hasattr(self, 'non_redundant'):
+            self.non_redundant = False
+        if not hasattr(self, 'mask_weights'):
+            self.mask_weights = None
+
     @wraps(Layer.get_lr_scalers)
     def get_lr_scalers(self):
 
@@ -1263,100 +1280,28 @@ class Softmax(Layer):
 
         return rval
 
-    @wraps(Layer.get_monitoring_channels)
-    def get_monitoring_channels(self):
-        warnings.warn("Layer.get_monitoring_channels is " +
-                      "deprecated. Use get_layer_monitoring_channels " +
-                      "instead. Layer.get_monitoring_channels " +
-                      "will be removed on or after september 24th 2014",
-                      stacklevel=2)
-
-        if self.no_affine:
-            return OrderedDict()
-
-        W = self.W
-
-        assert W.ndim == 2
-
-        sq_W = T.sqr(W)
-
-        row_norms = T.sqrt(sq_W.sum(axis=1))
-        col_norms = T.sqrt(sq_W.sum(axis=0))
-
-        return OrderedDict([('row_norms_min',  row_norms.min()),
-                            ('row_norms_mean', row_norms.mean()),
-                            ('row_norms_max',  row_norms.max()),
-                            ('col_norms_min',  col_norms.min()),
-                            ('col_norms_mean', col_norms.mean()),
-                            ('col_norms_max',  col_norms.max()), ])
-
-    @wraps(Layer.get_monitoring_channels_from_state)
-    def get_monitoring_channels_from_state(self, state, target=None):
-        warnings.warn("Layer.get_monitoring_channels_from_state is " +
-                      "deprecated. Use get_layer_monitoring_channels " +
-                      "instead. Layer.get_monitoring_channels_from_state " +
-                      "will be removed on or after september 24th 2014",
-                      stacklevel=2)
-
-        # channels that does not require state information
-        if self.no_affine:
-            rval = OrderedDict()
-
-        W = self.W
-
-        assert W.ndim == 2
-
-        sq_W = T.sqr(W)
-
-        row_norms = T.sqrt(sq_W.sum(axis=1))
-        col_norms = T.sqrt(sq_W.sum(axis=0))
-
-        rval = OrderedDict([('row_norms_min',  row_norms.min()),
-                            ('row_norms_mean', row_norms.mean()),
-                            ('row_norms_max',  row_norms.max()),
-                            ('col_norms_min',  col_norms.min()),
-                            ('col_norms_mean', col_norms.mean()),
-                            ('col_norms_max',  col_norms.max()), ])
-
-        mx = state.max(axis=1)
-
-        rval.update(OrderedDict([('mean_max_class', mx.mean()),
-                                 ('max_max_class', mx.max()),
-                                 ('min_max_class', mx.min())]))
-
-        if target is not None:
-            y_hat = T.argmax(state, axis=1)
-            y = T.argmax(target, axis=1)
-            misclass = T.neq(y, y_hat).mean()
-            misclass = T.cast(misclass, config.floatX)
-            rval['misclass'] = misclass
-            rval['nll'] = self.cost(Y_hat=state, Y=target)
-
-        return rval
-
     @wraps(Layer.get_layer_monitoring_channels)
     def get_layer_monitoring_channels(self, state_below=None,
                                       state=None, targets=None):
 
-        # channels that does not require state information
-        if self.no_affine:
-            rval = OrderedDict()
+        rval = OrderedDict()
 
-        W = self.W
+        if not self.no_affine:
+            W = self.W
 
-        assert W.ndim == 2
+            assert W.ndim == 2
 
-        sq_W = T.sqr(W)
+            sq_W = T.sqr(W)
 
-        row_norms = T.sqrt(sq_W.sum(axis=1))
-        col_norms = T.sqrt(sq_W.sum(axis=0))
+            row_norms = T.sqrt(sq_W.sum(axis=1))
+            col_norms = T.sqrt(sq_W.sum(axis=0))
 
-        rval = OrderedDict([('row_norms_min',  row_norms.min()),
-                            ('row_norms_mean', row_norms.mean()),
-                            ('row_norms_max',  row_norms.max()),
-                            ('col_norms_min',  col_norms.min()),
-                            ('col_norms_mean', col_norms.mean()),
-                            ('col_norms_max',  col_norms.max()), ])
+            rval.update(OrderedDict([('row_norms_min',  row_norms.min()),
+                        ('row_norms_mean', row_norms.mean()),
+                        ('row_norms_max',  row_norms.max()),
+                        ('col_norms_min',  col_norms.min()),
+                        ('col_norms_mean', col_norms.mean()),
+                        ('col_norms_max',  col_norms.max()), ]))
 
         if (state_below is not None) or (state is not None):
             if state is None:
@@ -1370,7 +1315,8 @@ class Softmax(Layer):
 
             if targets is not None:
                 y_hat = T.argmax(state, axis=1)
-                y = T.argmax(targets, axis=1)
+                y = (targets.reshape(y_hat.shape) if self._has_binary_target
+                     else T.argmax(targets, axis=1))
                 misclass = T.neq(y, y_hat).mean()
                 misclass = T.cast(misclass, config.floatX)
                 rval['misclass'] = misclass
@@ -1391,7 +1337,7 @@ class Softmax(Layer):
         self.needs_reformat = not isinstance(space, VectorSpace)
 
         if self.no_affine:
-            desired_dim = self.n_classes
+            desired_dim = self.n_classes - self.non_redundant
             assert self.input_dim == desired_dim
         else:
             desired_dim = self.input_dim
@@ -1405,19 +1351,20 @@ class Softmax(Layer):
         if self.no_affine:
             self._params = []
         else:
+            num_cols = self.n_classes - self.non_redundant
             if self.irange is not None:
                 assert self.istdev is None
                 assert self.sparse_init is None
                 W = rng.uniform(-self.irange,
                                 self.irange,
-                                (self.input_dim, self.n_classes))
+                                (self.input_dim, num_cols))
             elif self.istdev is not None:
                 assert self.sparse_init is None
-                W = rng.randn(self.input_dim, self.n_classes) * self.istdev
+                W = rng.randn(self.input_dim, num_cols) * self.istdev
             else:
                 assert self.sparse_init is not None
-                W = np.zeros((self.input_dim, self.n_classes))
-                for i in xrange(self.n_classes):
+                W = np.zeros((self.input_dim, num_cols))
+                for i in xrange(num_cols):
                     for j in xrange(self.sparse_init):
                         idx = rng.randint(0, self.input_dim)
                         while W[idx, i] != 0.:
@@ -1490,6 +1437,10 @@ class Softmax(Layer):
             b = self.b
 
             Z = T.dot(state_below, self.W) + b
+
+        if self.non_redundant:
+            zeros = T.alloc(0., Z.shape[0], 1)
+            Z = T.concatenate((zeros, Z), axis=1)
 
         rval = T.nnet.softmax(Z)
 
@@ -1731,10 +1682,6 @@ class SoftmaxPool(Layer):
 
     @wraps(Layer._modify_updates)
     def _modify_updates(self, updates):
-
-        # Patch old pickle files
-        if not hasattr(self, 'mask_weights'):
-            self.mask_weights = None
 
         if self.mask_weights is not None:
             W, = self.transformer.get_params()
@@ -2544,17 +2491,14 @@ class Tanh(Linear):
 
 class Sigmoid(Linear):
     """
-    A layer that performs an affine transformation of its (vectorial)
+    A layer that performs an affine transformation of its
     input followed by a logistic sigmoid elementwise nonlinearity.
-
-    .. todo::
-
-        WRITEME properly
 
     Parameters
     ----------
     monitor_style : string
-        Values can be either 'detection' or 'classification'.
+        Values can be any of ['detection', 'one_hot_class',
+        'bit_vector_class']
         'detection' is the default.
 
           - 'detection' : get_monitor_from_state makes no assumptions about
@@ -2567,17 +2511,34 @@ class Sigmoid(Linear):
             dataset fits in one minibatch, this is not the same
             as the true F1 score, etc., and will usually
             seriously overestimate your performance.
-          - 'classification' : get_monitor_from_state assumes target is one-hot
-            class indicator, even though you're training the
-            model as k independent sigmoids. gives info on how
-            good the argmax is as a classifier
+          - 'one_hot_class' : get_monitor_from_state assumes target is
+            one-hot class indicator, even though you're training the
+            model as k independent sigmoids. Gives info on how
+            good the argmax over the sigmoids behaves as a classifier.
+          - 'bit_vector_class' : get_monitor_from_state treats each
+            sigmoid as predicting a 1 iff its value is > 0.5. Each
+            example is counted as correct iff all of the bits in its
+            target are predicted correctly.
+            This includes as a special case the situation where the
+            target is a single 0 or 1 label.
+          - 'classification' : deprecated; originally this string was
+            used for 'one_hot_class', then due to a miscommunication
+            it was changed to be used for 'bit_vector_class'.
     kwargs : dict
-        WRITEME
+        Passed through to the Layer class constructor
     """
 
     def __init__(self, monitor_style='detection', **kwargs):
         super(Sigmoid, self).__init__(**kwargs)
-        assert monitor_style in ['classification', 'detection']
+        if monitor_style == 'classification':
+            monitor_style = 'bit_vector_class'
+            warnings.warn("The 'classification' monitor style is deprecated."
+                          " Switch to 'bit_vector_class' (or possibly"
+                          " 'one_hot_class' if your code predates 8f4b62b3df)."
+                          " 'classification' may be removed on or after "
+                          "2015-04-21.")
+        assert monitor_style in ['one_hot_class', 'bit_vector_class',
+                                 'detection']
         self.monitor_style = monitor_style
 
     @wraps(Layer.fprop)
@@ -2727,32 +2688,6 @@ class Sigmoid(Linear):
 
         return rval
 
-    @wraps(Layer.get_monitoring_channels_from_state)
-    def get_monitoring_channels_from_state(self, state, target=None):
-        warnings.warn("Layer.get_monitoring_channels_from_state is " +
-                      "deprecated. Use get_layer_monitoring_channels " +
-                      "instead. Layer.get_monitoring_channels_from_state " +
-                      "will be removed on or after september 24th 2014",
-                      stacklevel=2)
-
-        rval = super(Sigmoid, self).get_monitoring_channels_from_state(state,
-                                                                       target)
-
-        if target is not None:
-            if self.monitor_style == 'detection':
-                rval.update(self.get_detection_channels_from_state(state,
-                                                                   target))
-            else:
-                assert self.monitor_style == 'classification'
-                # Threshold Y_hat at 0.5.
-                prediction = T.gt(state, 0.5)
-                # If even one feature is wrong for a given training example,
-                # it's considered incorrect, so we max over columns.
-                incorrect = T.neq(target, prediction).max(axis=1)
-                rval['misclass'] = T.cast(incorrect, config.floatX).mean()
-
-        return rval
-
     @wraps(Layer.get_layer_monitoring_channels)
     def get_layer_monitoring_channels(self, state_below=None,
                                       state=None, targets=None):
@@ -2767,8 +2702,18 @@ class Sigmoid(Linear):
             if self.monitor_style == 'detection':
                 rval.update(self.get_detection_channels_from_state(state,
                                                                    targets))
+            elif self.monitor_style == 'one_hot_class':
+                # For this monitor style, we know (by assumption) that
+                # exactly one bit is always on, so we pick
+                # the single most likely bit under the model, regardless
+                # of whether its probability exceeds 0.5
+                prediction = state.argmax(axis=1)
+                labels = targets.argmax(axis=1)
+                incorrect = T.neq(prediction, labels)
+                misclass = T.cast(incorrect, config.floatX).mean()
+                rval['misclass'] = misclass
             else:
-                assert self.monitor_style == 'classification'
+                assert self.monitor_style == 'bit_vector_class'
                 # Threshold Y_hat at 0.5.
                 prediction = T.gt(state, 0.5)
                 # If even one feature is wrong for a given training example,

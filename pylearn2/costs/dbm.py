@@ -408,6 +408,12 @@ class BaseCD(DefaultDataSpecsMixin, Cost):
 
         return rval
 
+        layer_to_pos_samples = model.sampling_procedure.sample(
+            layer_to_state=layer_to_pos_samples,
+            layer_to_clamp=layer_to_clamp,
+            num_steps=self.num_gibbs_steps,
+            theano_rng=self.theano_rng)
+
 
 class VariationalCD(BaseCD):
     """
@@ -747,6 +753,80 @@ class VariationalPCD_VarianceReduction(DefaultDataSpecsMixin, Cost):
             gradients[param] = neg_phase_grads[param] + gradients[param]
 
         return gradients, updates
+
+
+class VariationalCD(DefaultDataSpecsMixin, BaseCD):
+    """
+    An intractable cost representing the negative log likelihood of a DBM.
+    The gradient of this bound is computed using a markov chain initialized
+    with the training example.
+
+    Source: Hinton, G. Training Products of Experts by Minimizing
+            Contrastive Divergence
+    """
+
+    def _get_positive_phase(self, model, X, Y=None):
+        """
+        .. todo::
+
+            WRITEME
+        """
+        return self._get_variational_pos(model, X, Y), OrderedDict()
+
+    def _get_negative_phase(self, model, X, Y=None):
+        """
+        .. todo::
+
+            WRITEME
+
+        d/d theta log Z = (d/d theta Z) / Z
+                        = (d/d theta sum_h sum_v exp(-E(v,h)) ) / Z
+                        = (sum_h sum_v - exp(-E(v,h)) d/d theta E(v,h) ) / Z
+                        = - sum_h sum_v P(v,h)  d/d theta E(v,h)
+        """
+        layer_to_clamp = OrderedDict([(model.visible_layer, True)])
+
+        layer_to_chains = model.make_layer_to_symbolic_state(self.num_chains,
+                                                             self.theano_rng)
+        # The examples are used to initialize the visible layer's chains
+        layer_to_chains[model.visible_layer] = X
+        # If we use supervised training, we need to make sure the targets are
+        # also clamped.
+        if self.supervised:
+            assert Y is not None
+            # note: if the Y layer changes to something without linear energy,
+            # we'll need to make the expected energy clamp Y in the positive
+            # phase
+            assert isinstance(model.hidden_layers[-1], Softmax)
+            layer_to_clamp[model.hidden_layers[-1]] = True
+            layer_to_chains[model.hidden_layers[-1]] = Y
+
+        model.layer_to_chains = layer_to_chains
+
+        # Note that we replace layer_to_chains with a dict mapping to the new
+        # state of the chains
+        # We first initialize the chain by clamping the visible layer and the
+        # target layer (if it exists)
+        layer_to_chains = model.sampling_procedure.sample(
+            layer_to_chains,
+            self.theano_rng,
+            layer_to_clamp=layer_to_clamp,
+            num_steps=1
+        )
+
+        # We then do the required mcmc steps
+        layer_to_chains = model.sampling_procedure.sample(
+            layer_to_chains,
+            self.theano_rng,
+            num_steps=self.num_gibbs_steps
+        )
+
+        if self.toronto_neg:
+            neg_phase_grads = self._get_toronto_neg(model, layer_to_chains)
+        else:
+            neg_phase_grads = self._get_standard_neg(model, layer_to_chains)
+
+        return neg_phase_grads, OrderedDict()
 
 
 class MF_L1_ActCost(DefaultDataSpecsMixin, Cost):
