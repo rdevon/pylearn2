@@ -12,10 +12,12 @@ import logging
 import numpy as np
 import warnings
 
+from theano.compat.six.moves import xrange
 from theano import tensor as T, config
 from theano.compat import OrderedDict
 from theano.sandbox.rng_mrg import MRG_RandomStreams
 
+from pylearn2.compat import OrderedDict
 from pylearn2.models import Model
 from pylearn2.models.dbm import flatten
 from pylearn2.models.dbm.inference_procedure import WeightDoubling

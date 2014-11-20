@@ -2,6 +2,8 @@
 Unit tests for format checking
 """
 
+from __future__ import print_function
+
 from nose.plugins.skip import SkipTest
 
 import os
@@ -140,10 +142,8 @@ whitelist_pep8 = [
     "utils/iteration.py",
     "utils/track_version.py",
     "scripts/get_version.py",
-    "blocks.py",
     "training_algorithms/tests/test_bgd.py",
     "training_algorithms/tests/test_default.py",
-    "training_algorithms/bgd.py",
     "training_algorithms/default.py",
     "training_algorithms/training_algorithm.py",
     "training_algorithms/sgd.py",
@@ -610,6 +610,7 @@ whitelist_docstrings.extend([
 
 # add files which fail to run to whitelist_docstrings
 whitelist_docstrings.extend([
+    'sandbox/rnn/models/mlp_hook.py',
     'training_algorithms/tests/test_learning_rule.py',
     'models/pca.py',
     'datasets/tests/test_hdf5.py',
@@ -696,12 +697,12 @@ def print_files_information_pep8():
         else:
             if rel_path in whitelist_pep8:
                 non_infracting_files.append(path)
-    print "Files that must be corrected or added to whitelist:"
+    print("Files that must be corrected or added to whitelist:")
     for file in infracting_files:
-        print file
-    print "Files that can be removed from whitelist:"
+        print(file)
+    print("Files that can be removed from whitelist:")
     for file in non_infracting_files:
-        print file
+        print(file)
 
 
 def test_format_docstrings():
@@ -711,7 +712,7 @@ def test_format_docstrings():
 
     try:
         verify_format_docstrings()
-    except SkipTest, e:
+    except SkipTest as e:
         import traceback
         traceback.print_exc(e)
         raise AssertionError(
