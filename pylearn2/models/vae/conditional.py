@@ -359,7 +359,8 @@ class DiagonalGaussian(Conditional):
         return CompositeLayer(
             layer_name='conditional',
             layers=[Linear(dim=self.ndim, layer_name='mu', irange=0.01),
-                    Linear(dim=self.ndim, layer_name='log_sigma', irange=0.01)]
+                    Linear(dim=self.ndim, layer_name='log_sigma', irange=0.01,
+                           init_bias=10)]
         )
 
     @wraps(Conditional._get_required_mlp_output_space)
