@@ -139,6 +139,10 @@ class VAE(Model):
         rval = OrderedDict()
 
         X = data
+
+        _, X_r = self.reconstruct(X)
+        rval["reconstruction_error"] = T.sqr(X - X_r).mean()
+
         epsilon_shape = (1, X.shape[0], self.nhid)
         epsilon = self.sample_from_epsilon(shape=epsilon_shape)
         phi = self.encode_phi(X)
