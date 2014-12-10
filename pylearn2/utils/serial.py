@@ -110,8 +110,8 @@ def load(filepath, recurse_depth=0, retry=True):
         try:
             return np.loadtxt(filepath)
         except Exception:
-            reraise_as(Exception("{0} cannot be loaded by serial.load (trying "
-                                 "to use np.loadtxt)".format(filepath)))
+            reraise_as("{0} cannot be loaded by serial.load (trying "
+                       "to use np.loadtxt)".format(filepath))
 
     if filepath.endswith('.mat'):
         global io
@@ -137,10 +137,8 @@ def load(filepath, recurse_depth=0, retry=True):
             logger.info('Max number of tries exceeded while trying to open '
                         '{0}'.format(filepath))
             logger.info('attempting to open via reading string')
-            f = open(filepath, 'rb')
-            lines = f.readlines()
-            f.close()
-            content = ''.join(lines)
+            with open(filepath, 'rb') as f:
+                content = f.read()
             return cPickle.loads(content)
         else:
             nsec = 0.5 * (2.0 ** float(recurse_depth))
@@ -193,7 +191,7 @@ def load(filepath, recurse_depth=0, retry=True):
         obj =  exponential_backoff()
     except Exception:
         #assert False
-        reraise_as(Exception("Couldn't open {0}".format(filepath)))
+        reraise_as("Couldn't open {0}".format(filepath))
 
     #if the object has no yaml_src, we give it one that just says it
     #came from this file. could cause trouble if you save obj again
@@ -454,7 +452,7 @@ def read_bin_lush_matrix(filepath):
     try:
         magic = read_int(f)
     except ValueError:
-        reraise_as(ValueError("Couldn't read magic number"))
+        reraise_as("Couldn't read magic number")
     ndim = read_int(f)
 
     if ndim == 0:
@@ -475,7 +473,7 @@ def read_bin_lush_matrix(filepath):
 
     excess = f.read(-1)
 
-    if excess != '':
+    if excess:
         raise ValueError(str(len(excess))+' extra bytes found at end of file.'
                 ' This indicates  mismatch between header and content')
 
