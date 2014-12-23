@@ -2100,6 +2100,8 @@ class GaussianVisLayer(VisibleLayer):
         self.__dict__.update(locals())
         del self.self
 
+        super(GaussianVisLayer, self).__init__()
+
         if bias_from_marginals is not None:
             del self.bias_from_marginals
             if self.nvis is None:
