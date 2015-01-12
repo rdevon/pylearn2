@@ -1,3 +1,72 @@
 !obj:pylearn2.train.Train {
-    dataset: &data !obj:pylearn2
+    dataset: &data !obj:pylearn2.neuroimaging_utils.datasets.SNP.MultiChromosome {
+        chromosomes: &cs "ALL",
+        dataset_name: &ds_name %(dataset_name)s,
+        start: 0,
+        stop: %(train_stop)d,
+        add_noise: True
+    },
+    model: !obj:pylearn2.neuroimaging_utils.models.multimodal_mlp.MultimodalMLP {
+    	dataset: *data,
+    	layers: [
+	    !obj:pylearn2.neuroimaging_utils.models.multimodal_mlp.MultiChromosomeLayer {
+                num_layers: 22,
+	        layer_to_copy: !obj:pylearn2.models.mlp.RectifiedLinear {
+		    layer_name: "h1",
+		    dim: 100,
+		    sparse_init: 15
+		},
+                layer_dims: %(layer_dims)r
+	    },
+	    !obj:pylearn2.models.mlp.RectifiedLinear {
+	        layer_name: "h2",
+		dim: 100,
+		sparse_init: 15
+	    }
+	]
+    }, 
+    algorithm: !obj:pylearn2.training_algorithms.sgd.SGD {
+        batch_size: %(batch_size)i,
+        learning_rate: %(learning_rate)f,
+        train_iteration_mode: "even_shuffled_sequential",
+        monitor_iteration_mode: "even_sequential",
+        monitoring_batch_size: 5,
+        monitoring_batches: 10,
+        monitoring_dataset : {
+            'train' : *data,
+            'valid': !obj:pylearn2.neuroimaging_utils.datasets.SNP.MultiChromosome {
+	        chromosomes: *cs,
+		dataset_name: *ds_name,
+		start: %(train_stop)d,
+		stop: %(valid_stop)d
+                },
+	    'test1': obj:pylearn2.neuroimaging_utils.datasets.SNP.MultiChromosome {
+	        chromosomes: *cs,
+		datatset_name: %(test1_name)s,
+		},
+	    'test2': obj:pylearn2.neuroimaging_utils.datasets.SNP.MultiChromosome {
+	        chromosomes: *cs,
+		datatset_name: %(test2_name)s,
+		},
+            },
+        cost: !obj:pylearn2.costs.mlp.Default {},
+        # Momentum on gradients.
+        learning_rule: !obj:pylearn2.training_algorithms.learning_rule.Momentum {
+            init_momentum: %(init_momentum)f
+        },
+        termination_criterion: %(termination_criterion)s,
+    },
+    extensions: [
+        !obj:pylearn2.train_extensions.best_params.MonitorBasedSaveBest {
+             channel_name: 'valid_y_misclass',
+             save_path: "%(save_path)s_best.pkl"
+        }, 
+        !obj:pylearn2.training_algorithms.learning_rule.MomentumAdjustor {
+            start: 1,
+            saturate: 10,
+            final_momentum: %(final_momentum)f
+        }
+    ],
+    save_path: "%(save_path)s.pkl",
+    save_freq: 10
 }
