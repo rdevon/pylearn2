@@ -1,0 +1,3 @@
+!obj:pylearn2.train.Train {
+    dataset: &data !obj:pylearn2
+}
