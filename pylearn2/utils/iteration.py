@@ -17,6 +17,7 @@ Presets:
 """
 from __future__ import division
 
+import warnings
 import numpy as np
 from theano.compat import six
 
@@ -733,6 +734,11 @@ class FiniteDatasetIterator(object):
     -----
     See the documentation for :py:class:`SubsetIterator` for
     attribute documentation.
+
+    The dataset should provide a `get` method which accepts a tuple of source
+    identifiers and a list or slice of indexes and returns a tuple of batches
+    of examples, one for each source. The old interface using `get_data` is
+    deprecated and will become unsupported as of July 28, 2015.
     """
 
     def __init__(self, dataset, subset_iterator, data_specs=None,
@@ -753,7 +759,7 @@ class FiniteDatasetIterator(object):
         # or a pair of (non-nested CompositeSpace, non-nested tuple).
         # We could build a mapping and call flatten(..., return_tuple=True)
         # but simply putting spaces, sources and data in tuples is simpler.
-        if not isinstance(dataset_source, tuple):
+        if not isinstance(dataset_source, (tuple, list)):
             dataset_source = (dataset_source,)
 
         if not isinstance(dataset_space, CompositeSpace):
@@ -761,10 +767,6 @@ class FiniteDatasetIterator(object):
         else:
             dataset_sub_spaces = dataset_space.components
         assert len(dataset_source) == len(dataset_sub_spaces)
-
-        all_data = self._dataset.get_data()
-        if not isinstance(all_data, tuple):
-            all_data = (all_data,)
 
         space, source = data_specs
         if not isinstance(source, tuple):
@@ -775,14 +777,26 @@ class FiniteDatasetIterator(object):
             sub_spaces = space.components
         assert len(source) == len(sub_spaces)
 
-        self._raw_data = ()
-        for s in source:
-            try:
-                self._raw_data += (all_data[dataset_source.index(s)],)
-            except ValueError as e:
-                msg = str(e) + '\nThe dataset does not provide '\
-                               'a source with name: '+s+'.'
-                reraise_as(ValueError(msg))
+        # If `dataset` is incompatible with the new interface, fall back to the
+        # old interface
+        if not hasattr(self._dataset, 'get'):
+            warnings.warn("dataset is using the old iterator interface which "
+                          "is deprecated and will become officially "
+                          "unsupported as of July 28, 2015. The dataset "
+                          "should implement a `get` method respecting the new "
+                          "interface.")
+            all_data = self._dataset.get_data()
+            if not isinstance(all_data, tuple):
+                all_data = (all_data,)
+            raw_data = []
+            for s in source:
+                try:
+                    raw_data.append(all_data[dataset_source.index(s)])
+                except ValueError as e:
+                    msg = str(e) + '\nThe dataset does not provide '\
+                                   'a source with name: ' + s + '.'
+                    reraise_as(ValueError(msg))
+            self._raw_data = tuple(raw_data)
 
         self._source = source
         self._space = sub_spaces
@@ -793,38 +807,28 @@ class FiniteDatasetIterator(object):
             assert len(convert) == len(source)
             self._convert = convert
 
-        for i, (so, sp, dt) in enumerate(safe_izip(source,
-                                                   sub_spaces,
-                                                   self._raw_data)):
-            idx = dataset_source.index(so)
+        for i, (so, sp) in enumerate(safe_izip(source, sub_spaces)):
+            try:
+                idx = dataset_source.index(so)
+            except ValueError as e:
+                msg = str(e) + '\nThe dataset does not provide '\
+                               'a source with name: ' + so + '.'
+                reraise_as(ValueError(msg))
             dspace = dataset_sub_spaces[idx]
 
-            init_fn = self._convert[i]
-            fn = init_fn
+            fn = self._convert[i]
 
-            # If there is an init_fn, it is supposed to take
-            # care of the formatting, and it should be an error
-            # if it does not. If there was no init_fn, then
-            # the iterator will try to format using the generic
+            # If there is a fn, it is supposed to take care of the formatting,
+            # and it should be an error if it does not. If there was no fn,
+            # then the iterator will try to format using the generic
             # space-formatting functions.
-            if init_fn is None:
+            if fn is None:
                 # "dspace" and "sp" have to be passed as parameters
                 # to lambda, in order to capture their current value,
                 # otherwise they would change in the next iteration
                 # of the loop.
-                if fn is None:
-
-                    def fn(batch, dspace=dspace, sp=sp):
-                        try:
-                              return dspace.np_format_as(batch, sp)
-                        except ValueError as e:
-                            msg = str(e) + '\nMake sure that the model and '\
-                                           'dataset have been initialized with '\
-                                           'correct values.'
-                            reraise_as(ValueError(msg))
-                else:
-                    fn = (lambda batch, dspace=dspace, sp=sp, fn_=fn:
-                          dspace.np_format_as(fn_(batch), sp))
+                fn = (lambda batch, dspace=dspace, sp=sp:
+                      dspace.np_format_as(batch, sp))
 
             self._convert[i] = fn
 
@@ -851,15 +855,31 @@ class FiniteDatasetIterator(object):
             When there are no more batches to return.
         """
         next_index = self._subset_iterator.next()
-        # TODO: handle fancy-index copies by allocating a buffer and
-        # using np.take()
+        # If the dataset is incompatible with the new interface, fall back to
+        # the old one
+        if hasattr(self._dataset, 'get'):
+            rval = self._next(next_index)
+        else:
+            rval = self._fallback_next(next_index)
 
-        rval = tuple(
-            fn(data[next_index]) if fn else data[next_index]
-            for data, fn in safe_izip(self._raw_data, self._convert))
         if not self._return_tuple and len(rval) == 1:
             rval, = rval
         return rval
+
+    def _next(self, next_index):
+        return tuple(
+            fn(batch) if fn else batch for batch, fn in
+            safe_izip(self._dataset.get(self._source, next_index),
+                      self._convert)
+        )
+
+    def _fallback_next(self, next_index):
+        # TODO: handle fancy-index copies by allocating a buffer and
+        # using np.take()
+        return tuple(
+            fn(data[next_index]) if fn else data[next_index]
+            for data, fn in safe_izip(self._raw_data, self._convert)
+        )
 
     def __next__(self):
         return self.next()
