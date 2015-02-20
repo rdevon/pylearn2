@@ -17,6 +17,7 @@ from theano import tensor as T, config
 from theano.compat import OrderedDict
 from theano.sandbox.rng_mrg import MRG_RandomStreams
 
+from pylearn2.blocks import Block
 from pylearn2.compat import OrderedDict
 from pylearn2.models import Model
 from pylearn2.models.dbm import flatten
@@ -739,7 +740,7 @@ class DBM(Model):
                                                          num_steps=1)
         return layer_to_chains
 
-class RBM(DBM):
+class RBM(DBM, Block):
     """
     A restricted Boltzmann machine.
 
@@ -765,5 +766,20 @@ class RBM(DBM):
         self.__dict__.update(locals())
         del self.self
         hidden_layers = [hidden_layer]
-        super(RBM, self).__init__(batch_size, visible_layer, hidden_layers, niter,
-                                  inference_procedure=UpDown(), sampling_procedure=GibbsOddEven())
+
+        DBM.__init__(self, batch_size, visible_layer, hidden_layers, niter,
+                     inference_procedure=UpDown(), sampling_procedure=GibbsOddEven())
+        Block.__init__(self)
+
+    def __call__(self, v):
+        rval = self.hidden_layers[0].upward_state(
+            self.hidden_layers[0].mf_update(
+                state_below = self.visible_layer.upward_state(v),
+                state_above = None,
+                layer_above = None
+            )
+        )
+        #shape = rval.shape.eval()
+        #raise ValueError(rval.eval().shape)
+        #raise ValueError()
+        return rval
