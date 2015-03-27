@@ -31,6 +31,7 @@ from pylearn2.models import dbm
 from pylearn2.models.dbm import BinaryVectorMaxPool
 from pylearn2.models.dbm import flatten
 from pylearn2.models.dbm.layer import BinaryVector
+from pylearn2.models.dbm.layer import GaussianVisLayer
 from pylearn2.models.dbm import Softmax
 from pylearn2 import utils
 from pylearn2.utils import make_name
@@ -367,6 +368,7 @@ class BaseCD(DefaultDataSpecsMixin, Cost):
         gradients = OrderedDict()
         for param in list(pos_phase_grads.keys()):
             gradients[param] = neg_phase_grads[param] + pos_phase_grads[param]
+
         return gradients, updates
 
     def get_monitoring_channels(self, model, data):
@@ -490,6 +492,58 @@ class PCD(BaseCD):
         method = "TORONTO" if self.toronto_neg else "STANDARD"
         neg_phase_grads = negative_phase(model, layer_to_chains, method=method)
         return neg_phase_grads, updates
+
+
+class EnhancedCD(BaseCD):
+    def get_gradients(self, model, data, persistent=False):
+        """
+        .. todo::
+
+            WRITEME
+        """
+        self.get_data_specs(model)[0].validate(data)
+        if self.supervised:
+            X, Y = data
+            assert Y is not None
+        else:
+            X = data
+            Y = None
+
+        pos_phase_grads, pos_updates = self._get_positive_phase(model, X, Y)
+        neg_phase_grads, neg_updates = self._get_negative_phase(model, X, Y)
+
+        updates = OrderedDict()
+        if persistent:
+            for key, val in pos_updates.items():
+                updates[key] = val
+            for key, val in neg_updates.items():
+                updates[key] = val
+
+        gradients = OrderedDict()
+        for param in list(pos_phase_grads.keys()):
+            gradients[param] = neg_phase_grads[param] + pos_phase_grads[param]
+
+        W = model.hidden_layer.transformer.get_params()[0]
+        if isinstance(model.visible_layer, GaussianVisLayer):
+            vbias = model.visible_layer.mu
+        else:
+            vbias = model.visible_layer.bias
+
+        hbias = model.hidden_layer.b
+        print pos_updates
+        print neg_updates
+        v_d = X
+        h_d = model(X)
+        v_m = neg_updates[neg_updates.keys()[0]]
+        h_m = neg_updates[neg_updates.keys()[1]]
+        v_dm = T.mean(v_d, axis=0) / np.float32(2) + T.mean(v_m, axis=0)
+        h_dm = T.mean(h_d, axis=0) / np.float32(2) + T.mean(h_m, axis=0)
+
+        gradients[W] = gradients[W] - T.outer(v_dm, gradients[hbias]) - T.outer(gradients[hbias], h_dm)
+        gradients[hbias] = gradients[vbias] - T.dot(h_dm, gradients[W].T)
+        gradients[hbias] = gradients[hbias] - T.dot(v_dm, gradients[W])
+
+        return gradients, updates
 
 
 class VariationalPCD(BaseCD):

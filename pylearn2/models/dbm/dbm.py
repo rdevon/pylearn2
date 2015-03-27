@@ -21,6 +21,7 @@ from pylearn2.blocks import Block
 from pylearn2.compat import OrderedDict
 from pylearn2.models import Model
 from pylearn2.models.dbm import flatten
+from pylearn2.models.dbm import layer
 from pylearn2.models.dbm.inference_procedure import WeightDoubling
 from pylearn2.models.dbm.inference_procedure import UpDown
 from pylearn2.models.dbm.sampling_procedure import GibbsEvenOdd
@@ -711,12 +712,20 @@ class DBM(Model):
         self.setup_inference_procedure()
         return self.inference_procedure.do_inpainting(*args, **kwargs)
 
-    def initialize_chains(self, X, Y, theano_rng):
+    def initialize_chains(self, X, Y, theano_rng, num_examples=1):
         # Initializing to data
-        layer_to_clamp = OrderedDict([(self.visible_layer, True)])
-        layer_to_chains = self.make_layer_to_symbolic_state(1, theano_rng)
+        if X is not None:
+            layer_to_clamp = OrderedDict([(self.visible_layer, True)])
+        else:
+            layer_to_clamp = OrderedDict()
+
+        layer_to_chains = self.make_layer_to_symbolic_state(num_examples,
+                                                            theano_rng)
         # initialized the visible layer to data
-        layer_to_chains[self.visible_layer] = X
+
+        if X is not None:
+            layer_to_chains[self.visible_layer] = X
+
         # if supervised, also clamp targets
         if Y is not None:
             assert self.label_layer is not None
@@ -762,7 +771,9 @@ class RBM(DBM, Block):
         Number of mean field iterations for variational inference
         for the positive phase.
     """
-    def __init__(self, batch_size, visible_layer, hidden_layer, niter, label_layer=None):
+    def __init__(self, batch_size, visible_layer, hidden_layer, niter,
+                 label_layer=None, call_method="MF"):
+        assert call_method in ("MF", "SAMPLING")
         self.__dict__.update(locals())
         del self.self
         hidden_layers = [hidden_layer]
@@ -771,15 +782,64 @@ class RBM(DBM, Block):
                      inference_procedure=UpDown(), sampling_procedure=GibbsOddEven())
         Block.__init__(self)
 
-    def __call__(self, v):
-        rval = self.hidden_layers[0].upward_state(
-            self.hidden_layers[0].mf_update(
-                state_below = self.visible_layer.upward_state(v),
-                state_above = None,
-                layer_above = None
-            )
-        )
-        #shape = rval.shape.eval()
-        #raise ValueError(rval.eval().shape)
-        #raise ValueError()
+    def __call__(self, X, reverse=False, call_method=None):
+        if not hasattr(self, "call_method"):
+            logger.warning("Old RBM object has no call method. Setting to MF")
+            self.call_method = "MF"
+
+        if call_method is None:
+            call_method = self.call_method
+
+        assert call_method in ["MF", "SAMPLING", "MUL"]
+
+        if reverse:
+            if call_method == "MF":
+                rval = self.visible_layer.mf_update(
+                    state_above=X,
+                    layer_above=self.hidden_layer
+                )
+            elif call_method == "MUL":
+                raise NotImplementedError()
+            elif call_method == "SAMPLING":
+                ral = self.visible_layer.sample(
+                    state_above=X,
+                    layer_above=self.hidden_layer
+                )
+            else:
+                raise NotImplementedError()
+        else:
+            if call_method == "MF":
+                rval = self.hidden_layer.upward_state(
+                    self.hidden_layer.mf_update(
+                        state_below=self.visible_layer.upward_state(X),
+                        state_above=None,
+                        layer_above=None
+                    )
+                )
+            elif call_method == "MUL":
+                W = self.hidden_layer.transformer.get_params()[0]
+                rval = self.visible_layer.upward_state(X).dot(W)
+            elif call_method == "SAMPLING":
+                rval = self.hidden_layers[0].upward_state(
+                    self.hidden_layer.sample(
+                        state_below=self.visible_layer.upward_state(X),
+                        state_above=None,
+                        layer_above=None,
+                        theano_rng=self.rng
+                    )
+                )
+            else:
+                raise NotImplementedError()
         return rval
+
+class BGRBM(RBM):
+    def __init__(self, batch_size, niter, nvis, nhid, center, label_layer=None,
+                 call_method="MF") :
+        visible_layer = layer.GaussianVisLayer(nvis=nvis)
+        hidden_layer = layer.BVMP_Gaussian(input_layer=visible_layer,
+                                           layer_name="h", pool_size=1,
+                                           detector_layer_dim=nhid, irange=.01,
+                                           center=True)
+        super(BGRBM, self).__init__(batch_size, visible_layer, hidden_layer,
+                                    niter, label_layer=label_layer,
+                                    call_method=call_method)

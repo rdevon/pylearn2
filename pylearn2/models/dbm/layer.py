@@ -2394,6 +2394,20 @@ class GaussianVisLayer(VisibleLayer):
                        std = 1. / T.sqrt(self.beta))
         return rval
 
+    def mf_update(self, state_above, layer_above):
+        """
+        .. todo::
+
+            WRITEME
+        """
+        msg = layer_above.downward_message(state_above)
+
+        z = msg + self.mu
+
+        rval = z
+
+        return rval
+
     def make_symbolic_state(self, num_examples, theano_rng):
         """
         .. todo::
