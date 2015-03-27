@@ -530,8 +530,7 @@ class EnhancedCD(BaseCD):
             vbias = model.visible_layer.bias
 
         hbias = model.hidden_layer.b
-        print pos_updates
-        print neg_updates
+
         v_d = X
         h_d = model(X)
         v_m = neg_updates[neg_updates.keys()[0]]
