@@ -539,7 +539,7 @@ class EnhancedCD(BaseCD):
         h_dm = T.mean(h_d, axis=0) / np.float32(2) + T.mean(h_m, axis=0)
 
         gradients[W] = gradients[W] - T.outer(v_dm, gradients[hbias]) - T.outer(gradients[hbias], h_dm)
-        gradients[hbias] = gradients[vbias] - T.dot(h_dm, gradients[W].T)
+        gradients[vbias] = gradients[vbias] - T.dot(h_dm, gradients[W].T)
         gradients[hbias] = gradients[hbias] - T.dot(v_dm, gradients[W])
 
         return gradients, updates
