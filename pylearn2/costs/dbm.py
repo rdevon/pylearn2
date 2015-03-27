@@ -537,8 +537,7 @@ class EnhancedCD(BaseCD):
         h_m = neg_updates[neg_updates.keys()[1]]
         v_dm = T.mean(v_d, axis=0) / np.float32(2) + T.mean(v_m, axis=0)
         h_dm = T.mean(h_d, axis=0) / np.float32(2) + T.mean(h_m, axis=0)
-
-        gradients[W] = gradients[W] - T.outer(v_dm, gradients[hbias]) - T.outer(gradients[hbias], h_dm)
+        gradients[W] = gradients[W] - T.outer(v_dm, gradients[hbias]) - T.outer(gradients[vbias], h_dm)
         gradients[vbias] = gradients[vbias] - T.dot(h_dm, gradients[W].T)
         gradients[hbias] = gradients[hbias] - T.dot(v_dm, gradients[W])
 
